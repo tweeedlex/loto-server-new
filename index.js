@@ -120,7 +120,7 @@ app.ws("/game", (ws, req) => {
           timeout.timeoutStarted = true;
           timeout.timeoutId = setTimeout(async () => {
             await gameService.startLotoGame(ws, aWss, msg);
-          }, 10000);
+          }, 30000);
         }
         await gameConnectionHandler(ws, msg);
         await checkBet(msg);

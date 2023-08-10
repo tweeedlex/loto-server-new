@@ -104,7 +104,7 @@ class GameService {
       // добавляем в базу информацию когда текущая игра заканчивается.
       await LotoGame.update(
         {
-          finishesAt: new Date().getTime() + minimum * 200 + 10000,
+          finishesAt: new Date().getTime() + minimum * 1000 + 15000,
           isStarted: true,
         },
         { where: { gameLevel: msg.roomId } }
@@ -279,6 +279,8 @@ async function giveCasksOnline(ws, aWss, roomId, casks, finalists, bank) {
               { where: { gameLevel: roomId } }
             );
 
+            await LotoCard.destroy({ where: { gameLevel: roomId } });
+
             // отправляем сообщение об онлайне всем клиентам
             let allRoomsOnline = getAllRoomsOnline(aWss);
             let generalRoomsMessage = {
@@ -287,7 +289,7 @@ async function giveCasksOnline(ws, aWss, roomId, casks, finalists, bank) {
             };
             broadcastMenu(aWss, generalRoomsMessage);
 
-            // отправляем сообщение об онлайне всем клиентам
+            // отправляем сообщение о банке всем клиентам
             let allRoomsBank = checkAllBets(aWss);
 
             // broadcastMenu(aWss, generalBankMessage);
@@ -329,7 +331,7 @@ async function giveCasksOnline(ws, aWss, roomId, casks, finalists, bank) {
         broadcastGame(aWss, roomId, leftSomeMessage1);
 
         index++;
-        setTimeout(sendNextCask, 200); // 2-second delay
+        setTimeout(sendNextCask, 1000); // 2-second delay
       }
     }
 
