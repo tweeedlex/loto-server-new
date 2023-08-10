@@ -56,7 +56,7 @@ class GameController {
         );
 
         // ============================================================================================
-        // ==========================================TIMEOUT===========================================
+        // ==========================================TIME=OUT==========================================
         // ============================================================================================
 
         timeoutId = setTimeout(async () => {
@@ -157,6 +157,7 @@ class GameController {
       const { roomId } = req.params;
 
       const lotoGame = await LotoGame.findOne({ where: { gameLevel: roomId } });
+      console.log(`room ${roomId}: status - ${lotoGame.isStarted}`);
       if (lotoGame.isStarted) {
         return res.status(200).json(true);
       } else {

@@ -51,25 +51,25 @@ const Token = sequelize.define("token", {
 //   status: { type: DataTypes.STRING, defaultValue: "WAITING" },
 // });
 
-const Loto = sequelize.define("loto", {
-  id: {
-    type: DataTypes.INTEGER,
-    primaryKey: true,
-    unique: true,
-    allowNull: false,
-    autoIncrement: true,
-  },
-  gameLevel: { type: DataTypes.INTEGER, allowNull: false },
-});
+// const Loto = sequelize.define("loto", {
+//   id: {
+//     type: DataTypes.INTEGER,
+//     primaryKey: true,
+//     unique: true,
+//     allowNull: false,
+//     autoIncrement: true,
+//   },
+//   gameLevel: { type: DataTypes.INTEGER, allowNull: false },
+// });
 
 const LotoCard = sequelize.define("card", {
   id: {
-    type: DataTypes.INTEGER,
+    type: DataTypes.STRING,
     primaryKey: true,
     unique: true,
     allowNull: false,
-    autoIncrement: true,
   },
+  gameLevel: { type: DataTypes.INTEGER, allowNull: false },
   card: { type: DataTypes.JSON, allowNull: false },
 });
 
@@ -82,14 +82,11 @@ const LotoGame = sequelize.define("lotoGame", {
     autoIncrement: true,
   },
   startedAt: { type: DataTypes.DATE },
+  finishesAt: { type: DataTypes.DATE },
   isStarted: { type: DataTypes.BOOLEAN, defaultValue: false },
   isWaiting: { type: DataTypes.BOOLEAN, defaultValue: false },
-  timeoutId: { type: DataTypes.STRING },
   gameLevel: { type: DataTypes.INTEGER, allowNull: false, unique: true },
 });
-
-Loto.hasMany(LotoCard);
-LotoCard.belongsTo(Loto);
 
 User.hasMany(Token);
 Token.belongsTo(User);
@@ -97,8 +94,8 @@ Token.belongsTo(User);
 User.hasMany(LotoCard);
 LotoCard.belongsTo(User);
 
-User.hasOne(Loto);
-Loto.belongsTo(User);
+// User.hasOne(Loto);
+// Loto.belongsTo(User);
 
 // Room.hasMany(Game);
 // Game.belongsTo(Room);
@@ -112,7 +109,7 @@ Loto.belongsTo(User);
 module.exports = {
   User,
   Token,
-  Loto,
+  // Loto,
   LotoGame,
   LotoCard,
 };
