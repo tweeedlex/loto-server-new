@@ -155,14 +155,38 @@ class GameController {
   async isGameStarted(req, res) {
     try {
       const { roomId } = req.params;
-
       const lotoGame = await LotoGame.findOne({ where: { gameLevel: roomId } });
-      console.log(`room ${roomId}: status - ${lotoGame.isStarted}`);
       if (lotoGame.isStarted) {
         return res.status(200).json(true);
       } else {
         return res.status(200).json(false);
       }
+    } catch (e) {
+      console.log(e);
+    }
+  }
+
+  async isUserInGame(req, res) {
+    try {
+      const { roomId } = req.params;
+      const userId = req.user.id;
+
+      console.log(`room: ${roomId} - user: ${userId}`);
+
+      const roomCards = await LotoCard.findAll({
+        where: { gameLevel: roomId },
+      });
+
+      let isUserInGame = false;
+
+      roomCards.forEach((roomCard) => {
+        let userWithCardId = roomCard.userId;
+        if (userWithCardId == userId) {
+          isUserInGame = true;
+        }
+      });
+
+      return res.status(200).json(isUserInGame);
     } catch (e) {
       console.log(e);
     }

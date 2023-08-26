@@ -13,7 +13,7 @@ module.exports = class ApiError extends Error {
   }
 
   static UnauthorizedAdminError() {
-    return new ApiError(401, "Пользователь не имеет пра администратора");
+    return new ApiError(401, "Пользователь не имеет прав администратора");
   }
 
   static BadRequest(message, errors = []) {

@@ -8,8 +8,18 @@ const cookieParser = require("cookie-parser");
 const router = require("./router/index");
 const errorMiddleware = require("./middlewares/error-middleware");
 const { Sequelize } = require("sequelize");
-const { Loto, LotoGame, LotoCard } = require("./models/db-models");
+const {
+  Loto,
+  LotoGame,
+  LotoCard,
+  LotoSetting,
+  Stats,
+  BotStats,
+} = require("./models/db-models");
+const AdminLotoService = require("./service/loto-admin-service");
 const gameService = require("./service/game-service");
+const lotoAdminService = require("./service/loto-admin-service");
+const roomsFunctions = require("./service/loto-rooms-functions");
 
 const PORT = process.env.PORT || 5001;
 
@@ -30,50 +40,64 @@ const start = async () => {
     await sequelize.authenticate();
     await sequelize.sync();
 
+    // await LotoGame.update(
+    //   {
+    //     bots: 0,
+    //     isStarted: false,
+    //     isWaiting: false,
+    //     startedAt: null,
+    //     finishesAt: null,
+    //     prevBank: 0,
+    //     botsTickets: JSON.stringify([]),
+    //   },
+    //   { where: { gameLevel: [1, 2, 3, 4, 5] } }
+    // );
+    // await LotoCard.destroy({ where: {} });
+
+    // await BotStats.create();
+    // await LotoGame.create({ gameLevel: 1 });
+    // await LotoGame.create({ gameLevel: 2 });
+    // await LotoGame.create({ gameLevel: 3 });
+    // await LotoGame.create({ gameLevel: 4 });
+    // await LotoGame.create({ gameLevel: 5 });
+    // await LotoSetting.create({
+    //   gameLevel: 1,
+    //   allowBots: 1,
+    //   maxBots: 4,
+    //   maxTickets: 6,
+    //   winChance: 20,
+    // });
+    // await LotoSetting.create({
+    //   gameLevel: 2,
+    //   allowBots: 1,
+    //   maxBots: 4,
+    //   maxTickets: 6,
+    //   winChance: 20,
+    // });
+    // await LotoSetting.create({
+    //   gameLevel: 3,
+    //   allowBots: 1,
+    //   maxBots: 4,
+    //   maxTickets: 6,
+    //   winChance: 20,
+    // });
+
+    // await LotoSetting.create({
+    //   gameLevel: 4,
+    //   allowBots: 1,
+    //   maxBots: 4,
+    //   maxTickets: 6,
+    //   winChance: 20,
+    // });
+    // await LotoSetting.create({
+    //   gameLevel: 5,
+    //   allowBots: 1,
+    //   maxBots: 4,
+    //   maxTickets: 6,
+    //   winChance: 20,
+    // });
+
     app.listen(PORT, () => console.log(`Server started on PORT = ${PORT}`));
-
-    // setInterval(async () => {
-    //   let usersInRoom = await Loto.findAll();
-    //   let room1 = [];
-    //   let room2 = [];
-    //   let room3 = [];
-    //   usersInRoom.forEach((user) => {
-    //     if (user.gameLevel == 1) {
-    //       room1.push(user);
-    //     }
-    //     if (user.gameLevel == 2) {
-    //       room2.push(user);
-    //     }
-    //     if (user.gameLevel == 3) {
-    //       room3.push(user);
-    //     }
-    //   });
-
-    //   if (room1.length == 0) {
-    //     await LotoGame.update(
-    //       { startedAt: null, isStarted: false, isWaiting: false },
-    //       {
-    //         where: { gameLevel: 1, isStarted: true },
-    //       }
-    //     );
-    //   }
-    //   if (room2.length == 0) {
-    //     await LotoGame.update(
-    //       { startedAt: null, isStarted: false, isWaiting: false },
-    //       {
-    //         where: { gameLevel: 2, isStarted: true },
-    //       }
-    //     );
-    //   }
-    //   if (room3.length == 0) {
-    //     await LotoGame.update(
-    //       { startedAt: null, isStarted: false, isWaiting: false },
-    //       {
-    //         where: { gameLevel: 3, isStarted: true },
-    //       }
-    //     );
-    //   }
-    // }, 10000);
   } catch (e) {
     console.log(e);
   }
@@ -85,6 +109,8 @@ const timeouts = [
   { roomId: 1, timeoutId: null, timeoutStarted: false },
   { roomId: 2, timeoutId: null, timeoutStarted: false },
   { roomId: 3, timeoutId: null, timeoutStarted: false },
+  { roomId: 4, timeoutId: null, timeoutStarted: false },
+  { roomId: 5, timeoutId: null, timeoutStarted: false },
 ];
 
 // web sockets для подключения к играм
@@ -95,96 +121,190 @@ app.ws("/game", (ws, req) => {
     switch (msg.method) {
       case "connectGeneral":
         broadcastMenu(ws, msg);
-        // отправка всем об онлайне в каждой игре
-        let rooms = getAllRoomsOnline();
-        for (const client of aWss.clients) {
-          let generalMessage = {
-            rooms: rooms,
-            method: "allRoomsOnline",
-          };
-          client.send(JSON.stringify(generalMessage));
-        }
-        // отправка всем о ставке в каждой игре
-        await checkAllBets();
-        await getAllRoomsStartTimers();
-        await getAllRoomsFinishTimers();
+        // отправка всем об онлайне в меню
+        let rooms = await roomsFunctions.getAllRoomsOnline(aWss);
+        roomsFunctions.sendAll(aWss, "allRoomsOnline", { rooms: rooms });
+
+        // отправка всем о джекпотах в меню
+        let roomsJackpots = await roomsFunctions.checkAllJackpots();
+        roomsFunctions.sendAll(aWss, "updateAllRoomsJackpot", {
+          jackpots: roomsJackpots,
+        });
+        // отправка всем о ставке в меню
+        let roomsBet = await roomsFunctions.checkAllBets();
+        roomsFunctions.sendAll(aWss, "updateAllRoomsBank", { bank: roomsBet });
+
+        // отправка всем о начале игры в меню
+        let roomsStartTimer = await roomsFunctions.getAllRoomsStartTimers();
+        roomsFunctions.sendAll(aWss, "allRoomsStartTimers", {
+          timers: roomsStartTimer,
+        });
+
+        // отправка всем о конце игры в меню
+        let roomsFinishTimer = await roomsFunctions.getAllRoomsFinishTimers();
+        roomsFunctions.sendAll(aWss, "allRoomsFinishTimers", {
+          timers: roomsFinishTimer,
+        });
+
+        // отправка всем о последнем банке в играх
+        let prevBank = await roomsFunctions.getAllPrevBets();
+        roomsFunctions.sendAll(aWss, "updateAllRoomsPrevBank", {
+          prevBank: prevBank,
+        });
+
+        break;
+      case "getAllInfo":
+        // отправка всем об онлайне в меню
+        let allRoomsOnline = await roomsFunctions.getAllRoomsOnline(aWss);
+        roomsFunctions.sendAll(aWss, "allRoomsOnline", {
+          rooms: allRoomsOnline,
+        });
+        // отправка всем о джекпотах в меню
+        let allRoomsJackpots = await roomsFunctions.checkAllJackpots();
+        roomsFunctions.sendAll(aWss, "updateAllRoomsJackpot", {
+          jackpots: allRoomsJackpots,
+        });
+        // отправка всем о ставке в меню
+        let allRoomsBet = await roomsFunctions.checkAllBets();
+        roomsFunctions.sendAll(aWss, "updateAllRoomsBank", {
+          bank: allRoomsBet,
+        });
+
+        // отправка всем о начале игры в меню
+        let allRoomsStartTimer = await roomsFunctions.getAllRoomsStartTimers();
+        roomsFunctions.sendAll(aWss, "allRoomsStartTimers", {
+          timers: allRoomsStartTimer,
+        });
+
+        // отправка всем о конце игры в меню
+        let allRoomsFinishTimer =
+          await roomsFunctions.getAllRoomsFinishTimers();
+        roomsFunctions.sendAll(aWss, "allRoomsFinishTimers", {
+          timers: allRoomsFinishTimer,
+        });
+
         break;
 
       case "connectGame":
-        let timerStarted = await isTimerStarted(msg);
-        if (!timerStarted) {
-          // find timeout with id of roomid
-          let timeout = timeouts.find(
-            (timeout) => timeout.roomId == msg.roomId
-          );
-          timeout.timeoutStarted = true;
-          timeout.timeoutId = setTimeout(async () => {
-            await gameService.startLotoGame(ws, aWss, msg);
-          }, 30000);
-        }
+        // let timerStarted;
+        // // get online (bots and players) in room
+        // const gameState = await LotoGame.findOne({
+        //   where: { gameLevel: msg.roomId },
+        // });
+
+        // if (gameState.isWaiting && gameState.startedAt != null) {
+        //   timerStarted = true;
+        // } else timerStarted = false;
+
+        // let roomOnlineWithBots = await checkPeopleOnline(msg.roomId);
+
+        // roomOnlineWithBots += gameState.bots;
+
+        // // начало игры
+        // if (roomOnlineWithBots >= 3 && gameState.isWaiting == false) {
+        //   if (!timerStarted) {
+        //     setTimeout(async () => {
+        //       await gameService.startLotoGame(ws, aWss, msg);
+        //     }, 30000);
+        //   }
+        // }
         await gameConnectionHandler(ws, msg);
-        await checkBet(msg);
-        await checkAllBets();
+
+        await gameService.startRoomLobby(ws, aWss, msg);
+
+        await gameService.checkBet(ws, aWss, msg);
+        await roomsFunctions.checkJackpot(ws, aWss, msg);
+
+        // // отправка всем о ставке в меню
+        // let gameRoomsBet = await roomsFunctions.checkAllBets();
+        // roomsFunctions.sendAll(aWss, "updateAllRoomsBank", {
+        //   bank: gameRoomsBet,
+        // });
+
         break;
       case "buyTickets":
         let isBought = await gameService.gameBuyTickets(ws, msg);
         if (isBought) {
           sendTicketsToClient(ws, msg);
+          await AdminLotoService.createBot(ws, aWss, msg);
+        } else {
+          ws.send(JSON.stringify({ method: "buyTickets", isBought: false }));
         }
         break;
+      case "cancelCard":
+        console.log("msg.cardId:", msg.cardId);
+        const cardId = msg.cardId;
+        await LotoCard.update({ isActive: false }, { where: { id: cardId } });
     }
   });
 
   ws.on("close", async (status, msg) => {
     if (status > 1000) {
-      let roomOnline = await checkOnline();
-      await removeTimeout(roomOnline);
-      updateOnline();
+      let roomOnline = await checkPeopleOnline();
+      let gameStates = await LotoGame.findAll();
+
+      for (const game of gameStates) {
+        if (
+          game.bots > 0 &&
+          Boolean(game.isStarted) == false &&
+          Boolean(game.isWaiting) == false
+        ) {
+          await lotoAdminService.deleteBots(roomOnline);
+        }
+      }
+
+      // removeTimeout(roomOnline);
+
+      // обновить онлайн во всех комнатах на клиенте
+      let roomsOnline = await roomsFunctions.getAllRoomsOnline(aWss);
+      roomsFunctions.sendAll(aWss, "allRoomsOnline", { rooms: roomsOnline });
+
+      // // отправка всем о ставке в меню
+      // let roomsBet = await roomsFunctions.checkAllBets();
+      // roomsFunctions.sendAll(aWss, "updateAllRoomsBank", { bank: roomsBet });
+
       return;
     }
     msg = JSON.parse(msg);
     await gameDisconnectHandler(ws, msg);
-    await getAllRoomsStartTimers();
+    // отправка всем о начале игры в меню
+    let roomsStartTimer = await roomsFunctions.getAllRoomsStartTimers();
+    roomsFunctions.sendAll(aWss, "allRoomsStartTimers", {
+      timers: roomsStartTimer,
+    });
   });
 });
 
 const gameDisconnectHandler = async (ws, msg) => {
-  ws.roomId = msg.roomId;
+  switch (msg.method) {
+    // case "exitGame":
+    //   await LotoCard.destroy({ where: { userId: msg.userId } });
+    //   break;
+    case "disconnectGame":
+      ws.roomId = msg.roomId;
+      await gameService.checkBet(ws, aWss, msg);
+      await roomsFunctions.checkJackpot(ws, aWss, msg);
 
-  // await LotoCard.destroy({
-  //   where: { userId: msg.userId },
-  // });
-
-  await checkBet(msg);
-  await checkAllBets();
-  let roomOnline = await checkOnline(msg.roomId);
-  if (roomOnline == 0) {
-    await removeTimeout(roomOnline, msg.roomId);
-
-    // let lotoGameInfo = await LotoGame.findOne({
-    //   where: { gameLevel: msg.roomId },
-    // });
-
-    // if (lotoGameInfo.isStarted == true) {
-    //   return;
-    // }
-
-    // await LotoGame.update(
-    //   { startedAt: null, isStarted: false, isWaiting: false },
-    //   {
-    //     where: { gameLevel: msg.roomId, isStarted: true },
-    //   }
-    // );
+      let roomOnline = await checkPeopleOnline(msg.roomId);
+      // if (roomOnline == 0) {
+      //   removeTimeout(roomOnline, msg.roomId);
+      //   await lotoAdminService.deleteBots(roomOnline, msg.roomId);
+      // }
+      // отправка всем о ставке в меню
+      // let roomsBet = await roomsFunctions.checkAllBets();
+      // roomsFunctions.sendAll(aWss, "updateAllRoomsBank", { bank: roomsBet });
+      // await AdminLotoService.deleteBot(ws, aWss, msg);
+      broadcastGame(ws, msg);
+      break;
   }
-  broadcastGame(ws, msg);
 };
 
-async function removeTimeout(roomOnline, roomId = null) {
+function removeTimeout(roomOnline, roomId = null) {
   if (roomId) {
     let timeout = timeouts.find((timeout) => timeout.roomId == roomId);
     clearTimeout(timeout.timeoutId);
   } else {
-    for (let room = 1; room <= 3; room++) {
+    for (let room = 1; room <= 5; room++) {
       const roomId = room;
       if (roomOnline[`room${roomId}`] === 0) {
         let timeout = timeouts.find((timeout) => timeout.roomId == roomId);
@@ -194,57 +314,6 @@ async function removeTimeout(roomOnline, roomId = null) {
   }
 }
 
-const checkBet = async (msg) => {
-  let cardsInRoom = await LotoCard.findAll({
-    where: { gameLevel: msg.roomId },
-  });
-  for (const client of aWss.clients) {
-    if (client.roomId == msg.roomId) {
-      message = {
-        method: "updateBank",
-        bank: cardsInRoom.length * msg.bet,
-      };
-      client.send(JSON.stringify(message));
-    }
-  }
-};
-
-const checkAllBets = async () => {
-  let roomsBet = {
-    room1: 0,
-    room2: 0,
-    room3: 0,
-  };
-  for (let room = 1; room <= 3; room++) {
-    const roomId = room;
-    let bet = 0;
-    switch (roomId) {
-      case 1:
-        bet = 20;
-        break;
-      case 2:
-        bet = 100;
-        break;
-      case 3:
-        bet = 300;
-        break;
-    }
-    let cardsInRoom = await LotoCard.findAll({
-      where: { gameLevel: room },
-    });
-    let roomBet = cardsInRoom.length * bet;
-    roomsBet[`room${roomId}`] = roomBet;
-  }
-
-  for (const client of aWss.clients) {
-    generalMessage = {
-      method: "updateAllRoomsBank",
-      bank: roomsBet,
-    };
-    client.send(JSON.stringify(generalMessage));
-  }
-};
-
 const sendTicketsToClient = async (ws, msg) => {
   ws.username = msg.user;
   for (const client of aWss.clients) {
@@ -253,11 +322,21 @@ const sendTicketsToClient = async (ws, msg) => {
     }
   }
 
-  await checkBet(msg);
-  await checkAllBets();
+  await gameService.checkBet(ws, aWss, msg);
+  await roomsFunctions.checkJackpot(ws, aWss, msg);
+
+  // отправка всем о джекпотах в меню
+  let roomsJackpots = await roomsFunctions.checkAllJackpots();
+  roomsFunctions.sendAll(aWss, "updateAllRoomsJackpot", {
+    jackpots: roomsJackpots,
+  });
+
+  // отправка всем о ставке в меню
+  let roomsBet = await roomsFunctions.checkAllBets();
+  roomsFunctions.sendAll(aWss, "updateAllRoomsBank", { bank: roomsBet });
 };
 
-const checkOnline = async (roomId = null) => {
+const checkPeopleOnline = async (roomId = null) => {
   if (roomId) {
     let roomOnline = 0;
     aWss.clients.forEach((client) => {
@@ -265,17 +344,18 @@ const checkOnline = async (roomId = null) => {
         roomOnline++;
       }
     });
-    if (roomOnline == 0) {
-      await LotoGame.update(
-        { startedAt: null, isStarted: false, isWaiting: false },
-        {
-          where: { gameLevel: roomId },
-        }
-      );
-      await LotoCard.destroy({
-        where: { gameLevel: roomId },
-      });
-    }
+
+    // if (roomOnline == 0) {
+    //   // await LotoGame.update(
+    //   //   { startedAt: null, isStarted: false, isWaiting: false },
+    //   //   {
+    //   //     where: { gameLevel: roomId },
+    //   //   }
+    //   // );
+    //   // await LotoCard.destroy({
+    //   //   where: { gameLevel: roomId },
+    //   // });
+    // }
 
     return roomOnline;
   } else {
@@ -283,21 +363,12 @@ const checkOnline = async (roomId = null) => {
       room1: 0,
       room2: 0,
       room3: 0,
+      room4: 0,
+      room5: 0,
     };
-    for (let room = 1; room <= 3; room++) {
+    for (let room = 1; room <= 5; room++) {
       const roomId = room;
-      let bet = 0;
-      switch (roomId) {
-        case 1:
-          bet = 20;
-          break;
-        case 2:
-          bet = 100;
-          break;
-        case 3:
-          bet = 300;
-          break;
-      }
+
       // get every room online
       roomOnline = 0;
       aWss.clients.forEach((client) => {
@@ -308,23 +379,23 @@ const checkOnline = async (roomId = null) => {
 
       rooms[`room${roomId}`] = roomOnline;
 
-      if (roomOnline == 0) {
-        let lotoGameInfo = await LotoGame.findOne({
-          where: { gameLevel: roomId },
-        });
+      // if (roomOnline == 0) {
+      //   let lotoGameInfo = await LotoGame.findOne({
+      //     where: { gameLevel: roomId },
+      //   });
 
-        if (lotoGameInfo.isStarted != true) {
-          await LotoGame.update(
-            { startedAt: null, isStarted: false, isWaiting: false },
-            {
-              where: { gameLevel: roomId },
-            }
-          );
-          await LotoCard.destroy({
-            where: { gameLevel: roomId },
-          });
-        }
-      }
+      //   if (lotoGameInfo.isStarted != true) {
+      //     await LotoGame.update(
+      //       { startedAt: null, isStarted: false, isWaiting: false },
+      //       {
+      //         where: { gameLevel: roomId },
+      //       }
+      //     );
+      //     // await LotoCard.destroy({
+      //     //   where: { gameLevel: roomId },
+      //     // });
+      //   }
+      // }
     }
     return rooms;
   }
@@ -332,6 +403,7 @@ const checkOnline = async (roomId = null) => {
 
 const gameConnectionHandler = async (ws, msg) => {
   ws.roomId = msg.roomId;
+  ws.userId = msg.userId;
   ws.username = msg.username;
   broadcastGame(ws, msg);
 };
@@ -345,9 +417,25 @@ const broadcastGame = async (ws, msg) => {
     }
   });
 
+  // // запуск таймера
+  // let timerStartedAt = await startRoomTimer(msg);
+  // if (timerStartedAt) {
+  //   msg.startedAt = timerStartedAt;
+  //   // отправка всем о начале игры в меню
+  //   let roomsStartTimer = await roomsFunctions.getAllRoomsStartTimers();
+  //   roomsFunctions.sendAll(aWss, "allRoomsStartTimers", {
+  //     timers: roomsStartTimer,
+  //   });
+  // }
+
+  // получение информации об игре
+  const game = await LotoGame.findOne({
+    where: { gameLevel: msg.roomId },
+  });
+
   // get room online
-  roomOnline = 0;
-  users = [];
+  let roomOnline = 0;
+  let users = [];
   aWss.clients.forEach((client) => {
     if (client.roomId == msg.roomId) {
       users.push(client.username);
@@ -355,18 +443,9 @@ const broadcastGame = async (ws, msg) => {
     }
   });
 
-  // запуск таймера
-  let timerStarted = await startRoomTimer(msg);
-  if (timerStarted) {
-    msg.startedAt = timerStarted;
-  }
+  roomOnline += game.bots;
 
-  // получение информации об игре
-  const game = await LotoGame.findOne({
-    where: { gameLevel: msg.roomId },
-  });
-
-  // отправка информации на клиентов с комнаты
+  // отправка информации на клиентов в комнате
   for (const client of aWss.clients) {
     if (client.roomId == msg.roomId) {
       msg.online = roomOnline;
@@ -377,47 +456,8 @@ const broadcastGame = async (ws, msg) => {
   }
 
   // отправка всем об онлайне в каждой игре
-  let rooms = getAllRoomsOnline();
-  for (const client of aWss.clients) {
-    let generalMessage = {
-      rooms: rooms,
-      method: "allRoomsOnline",
-    };
-    client.send(JSON.stringify(generalMessage));
-  }
-};
-
-const getAllRoomsOnline = () => {
-  let rooms = {
-    room1: 0,
-    room2: 0,
-    room3: 0,
-  };
-  for (let room = 1; room <= 3; room++) {
-    const roomId = room;
-    let bet = 0;
-    switch (roomId) {
-      case 1:
-        bet = 20;
-        break;
-      case 2:
-        bet = 100;
-        break;
-      case 3:
-        bet = 300;
-        break;
-    }
-    // get every room online
-    roomOnline = 0;
-    aWss.clients.forEach((client) => {
-      if (client.roomId == roomId) {
-        roomOnline++;
-      }
-    });
-
-    rooms[`room${roomId}`] = roomOnline;
-  }
-  return rooms;
+  let rooms = await roomsFunctions.getAllRoomsOnline(aWss);
+  roomsFunctions.sendAll(aWss, "allRoomsOnline", { rooms: rooms });
 };
 
 const isTimerStarted = async (msg) => {
@@ -432,8 +472,8 @@ const isTimerStarted = async (msg) => {
 };
 const startRoomTimer = async (msg) => {
   // get room online
-  roomOnline = 0;
-  users = [];
+  let roomOnline = 0;
+  let users = [];
   aWss.clients.forEach((client) => {
     if (client.roomId == msg.roomId) {
       users.push(client.username);
@@ -453,92 +493,9 @@ const startRoomTimer = async (msg) => {
       }
     );
 
-    await getAllRoomsStartTimers();
+    // await getAllRoomsStartTimers();
     return new Date();
   } else return false;
-};
-
-async function getAllRoomsStartTimers() {
-  const roomTimers = {
-    room1: null,
-    room2: null,
-    room3: null,
-  };
-
-  const rooms = await LotoGame.findAll();
-  for (let gameLevel = 1; gameLevel <= 3; gameLevel++) {
-    const room = rooms.find((room) => room.gameLevel == gameLevel);
-    roomTimers[`room${gameLevel}`] = room.startedAt;
-  }
-
-  const timersMessage = {
-    method: "allRoomsStartTimers",
-    timers: roomTimers,
-  };
-  for (const client of aWss.clients) {
-    client.send(JSON.stringify(timersMessage));
-  }
-}
-
-async function getAllRoomsFinishTimers() {
-  const roomTimers = {
-    room1: null,
-    room2: null,
-    room3: null,
-  };
-
-  const rooms = await LotoGame.findAll();
-  for (let gameLevel = 1; gameLevel <= 3; gameLevel++) {
-    const room = rooms.find((room) => room.gameLevel == gameLevel);
-    roomTimers[`room${gameLevel}`] = room.finishesAt;
-  }
-
-  const timersMessage = {
-    method: "allRoomsFinishTimers",
-    timers: roomTimers,
-  };
-  for (const client of aWss.clients) {
-    client.send(JSON.stringify(timersMessage));
-  }
-}
-
-const updateOnline = async () => {
-  for (let room = 1; room <= 3; room++) {
-    const roomId = room;
-    let bet = 0;
-    switch (roomId) {
-      case 1:
-        bet = 20;
-        break;
-      case 2:
-        bet = 100;
-        break;
-      case 3:
-        bet = 300;
-        break;
-    }
-    // get every room online
-    roomOnline = 0;
-    aWss.clients.forEach((client) => {
-      if (client.roomId == roomId) {
-        roomOnline++;
-      }
-    });
-
-    aWss.clients.forEach((client) => {
-      if (client.roomId == roomId) {
-        let msg = {
-          bet: bet,
-          roomId: roomId,
-          method: "disconnectGame",
-          online: roomOnline,
-          username: "Anonymus",
-        };
-
-        client.send(JSON.stringify(msg));
-      }
-    });
-  }
 };
 
 function disconnectexistingClient(counter, client) {
@@ -550,76 +507,7 @@ function disconnectexistingClient(counter, client) {
 // // web sockets для подключения к общей информации о комнатах на начальной странице
 
 const broadcastMenu = async (ws, msg) => {
-  let rooms = {
-    room1: 0,
-    room2: 0,
-    room3: 0,
-  };
-  for (let room = 1; room <= 3; room++) {
-    const roomId = room;
-    let bet = 0;
-    switch (roomId) {
-      case 1:
-        bet = 20;
-        break;
-      case 2:
-        bet = 100;
-        break;
-      case 3:
-        bet = 300;
-        break;
-    }
-    // get every room online
-    roomOnline = 0;
-    aWss.clients.forEach((client) => {
-      if (client.roomId == roomId) {
-        roomOnline++;
-      }
-    });
-
-    rooms[`room${roomId}`] = roomOnline;
-
-    // if (roomOnline == 0) {
-    //   await LotoGame.update(
-    //     { startedAt: null, isStarted: false, isWaiting: false },
-    //     {
-    //       where: { gameLevel: roomId },
-    //     }
-    //   );
-    //   await LotoCard.destroy({
-    //     where: { gameLevel: roomId },
-    //   });
-    // }
-  }
-
   for (const client of aWss.clients) {
     client.send(JSON.stringify(msg));
   }
 };
-
-// app.ws("/", (ws, req) => {
-//   ws.on("message", (msg) => {
-//     msg = JSON.parse(msg);
-//     switch (msg.method) {
-//       case "connection":
-//         connectionHandler(ws, msg);
-//         break;
-//     }
-//   });
-// });
-
-// const connectionHandler = (ws, msg) => {
-//   broadcastConnection(ws, msg);
-// };
-
-// const broadcastConnection = (ws, msg) => {
-//   let online = 0;
-//   aWss.clients.forEach((client) => {
-//     online++;
-//   });
-
-//   aWss.clients.forEach((client) => {
-//     msg.online = online;
-//     client.send(JSON.stringify(msg));
-//   });
-// };

@@ -9,5 +9,6 @@ module.exports = class UserDto {
     this.name = model.name;
     this.username = model.username;
     this.balance = model.balance;
+    this.isAdmin = model.isAdmin;
   }
 };

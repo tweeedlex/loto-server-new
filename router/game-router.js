@@ -10,6 +10,7 @@ router.delete(
 );
 router.delete("/clear-all", gameController.clearAll);
 router.get("/is-game-started/:roomId", gameController.isGameStarted);
+router.get("/is-user-in-game/:roomId", gameController.isUserInGame);
 router.get("/get-loto-online", gameController.getOnline);
 
 router.put("/finish-loto-waiting/:roomId", gameController.finishLotoWaiting);
