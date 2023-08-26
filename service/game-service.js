@@ -844,10 +844,14 @@ async function getAllRoomsFinishTimers(aWss) {
   };
 
   const rooms = await LotoGame.findAll();
-  for (let gameLevel = 1; gameLevel <= 5; gameLevel++) {
-    const room = rooms.find((room) => room.gameLevel == gameLevel);
-    roomTimers[`room${gameLevel}`] = room.finishesAt;
-  }
+  // for (let gameLevel = 1; gameLevel <= 5; gameLevel++) {
+  //   const room = rooms.find((room) => room.gameLevel == gameLevel);
+  //   roomTimers[`room${gameLevel}`] = room.finishesAt;
+  // }
+
+  rooms.forEach((room) => {
+    roomTimers[`room${room.gameLevel}`] = room.finishesAt;
+  });
 
   const timersMessage = {
     method: "allRoomsFinishTimers",
