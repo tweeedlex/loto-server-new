@@ -52,10 +52,15 @@ class RoomsService {
     };
 
     const allGames = await LotoGame.findAll();
-    for (let room = 1; room <= 5; room++) {
-      const game = allGames.find((game) => game.gameLevel == room);
-      roomsJackpot[`room${room}`] = game.jackpot;
-    }
+    // for (let room = 1; room <= 5; room++) {
+    //   const game = allGames.find((game) => game.gameLevel == room);
+    //   console.log(allGames);
+    //   roomsJackpot[`room${room}`] = game.jackpot;
+    // }
+
+    allGames.forEach((game) => {
+      roomsJackpot[`room${game.gameLevel}`] = game.jackpot;
+    });
 
     return roomsJackpot;
   }
@@ -213,10 +218,14 @@ class RoomsService {
     };
 
     const rooms = await LotoGame.findAll();
-    for (let gameLevel = 1; gameLevel <= 5; gameLevel++) {
-      const room = rooms.find((room) => room.gameLevel == gameLevel);
-      roomTimers[`room${gameLevel}`] = room.startedAt;
-    }
+    // for (let gameLevel = 1; gameLevel <= 5; gameLevel++) {
+    //   const room = rooms.find((room) => room.gameLevel == gameLevel);
+    //   roomTimers[`room${gameLevel}`] = room.startedAt;
+    // }
+
+    rooms.forEach((room) => {
+      roomTimers[`room${room.gameLevel}`] = room.startedAt;
+    });
 
     return roomTimers;
   }
@@ -231,10 +240,14 @@ class RoomsService {
     };
 
     const rooms = await LotoGame.findAll();
-    for (let gameLevel = 1; gameLevel <= 5; gameLevel++) {
-      const room = rooms.find((room) => room.gameLevel == gameLevel);
-      roomTimers[`room${gameLevel}`] = room.finishesAt;
-    }
+    // for (let gameLevel = 1; gameLevel <= 5; gameLevel++) {
+    //   const room = rooms.find((room) => room.gameLevel == gameLevel);
+    //   roomTimers[`room${gameLevel}`] = room.finishesAt;
+    // }
+
+    rooms.forEach((room) => {
+      roomTimers[`room${room.gameLevel}`] = room.finishesAt;
+    });
 
     return roomTimers;
   }
