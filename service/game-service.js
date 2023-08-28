@@ -10,6 +10,7 @@ const {
 } = require("../models/db-models");
 const lotoAdminService = require("./loto-admin-service");
 const roomsFunctions = require("./loto-rooms-functions");
+const axios = require("axios");
 const { literal } = require("sequelize");
 
 class GameService {
@@ -106,6 +107,7 @@ class GameService {
       // получаем все билеты для комнаты
       const lotoCards = await LotoCard.findAll({
         where: { gameLevel: msg.roomId },
+        include: User,
       });
 
       let lotoCardsArray = [];
@@ -162,6 +164,37 @@ class GameService {
       });
       finalists.winners.index = minimum;
 
+      finalists.winners.data = [];
+      finalists.winners.tickets.forEach((ticketId) => {
+        const ticket = lotoCards.find((ticket) => ticket.id == ticketId);
+        const card = JSON.parse(ticket.card);
+        const userName = ticket.user.username;
+
+        finalists.winners.data.push({ userName, card });
+      });
+      // {userName: bebra, card: [fdf, fdf, dfd]}, {userName: bebra, card: [fdf12, fdf4, dfd]}
+
+      finalists.winners.data = finalists.winners.data.reduce(
+        (result, currentItem) => {
+          const existingUser = result.find(
+            (user) => user.userName === currentItem.userName
+          );
+
+          if (existingUser) {
+            existingUser.cards.push(currentItem.card);
+          } else {
+            result.push({
+              userName: currentItem.userName,
+              cards: [currentItem.card],
+            });
+          }
+
+          return result;
+        },
+        []
+      );
+      // {userName: bebra, cards: [[fdf, fdf, dfd], [fdf12, fdf4, dfd]]}
+
       let botWinnerIndex = 90;
 
       if (isBotWon) {
@@ -171,8 +204,17 @@ class GameService {
         } else {
           botWinnerIndex = 16;
         }
+        const randomUserdata = await axios.get(
+          "https://random-data-api.com/api/v2/users"
+        );
+        // let botInfo = { userName: "Top4ik" };
+        let botInfo = { userName: randomUserdata.data.first_name };
+        botInfo.cards = [
+          generateFakeBotCard(finalists.winners.index, casks).cards,
+        ];
         finalists.winners.index = botWinnerIndex;
         finalists.winners.tickets = [];
+        finalists.winners.data = [botInfo];
 
         // получаем статистику ботов (в какой комнате выиграли)
         const botStat = await BotStats.findOne({ where: { id: 1 } });
@@ -488,12 +530,18 @@ async function giveCasksOnline(
     let left2Cask = 0;
     let left1Cask = 0;
     let isJackpotWon = false;
-    const jackpotCheckLimit = 25;
+    let jackpotData = { isJackpotWon: false };
+    const jackpotCheckLimit = 70;
 
     const allTickets = await LotoCard.findAll({
       where: { gameLevel: roomId },
     });
-    const allUsers = await User.findAll();
+    let allUsers = await User.findAll();
+
+    const roomsJackpots = await roomsFunctions.checkAllJackpots();
+    const jackpotSum = roomsJackpots[`room${roomId}`];
+
+    jackpotData.jackpotSum = jackpotSum;
 
     async function sendNextCask() {
       if (index < casks.length) {
@@ -514,7 +562,29 @@ async function giveCasksOnline(
               const jackpotWinner = checkJackpotWon(allTickets, pastCasks);
               if (jackpotWinner) {
                 isJackpotWon = true;
-                await handleJackpotWin(roomId, jackpotWinner, allUsers, aWss);
+                jackpotData.isJackpotWon = true;
+                jackpotData.jackpotWinnerId = jackpotWinner;
+                const winner = allUsers.find(
+                  (user) => user.id == jackpotWinner
+                );
+                if (winner) {
+                  jackpotData.jackpotWinnerName = winner.username;
+                }
+                // const roomsJackpots = await roomsFunctions.checkAllJackpots();
+                // const jackpotSum = roomsJackpots[`room${roomId}`];
+                // jackpotData.jackpotSum = jackpotSum;
+
+                await handleJackpotWin(
+                  roomId,
+                  jackpotWinner,
+                  allUsers,
+                  jackpotSum,
+                  aWss,
+                  game
+                );
+
+                // получаем всех юзеров после выигрыша джекпота
+                allUsers = await User.findAll();
               }
             }
           }
@@ -524,7 +594,9 @@ async function giveCasksOnline(
         if (casks.indexOf(cask) === winnerCaskId) {
           const currentTickets = await LotoCard.findAll({
             where: { gameLevel: roomId },
+            include: User,
           });
+
           // choose tickets that are not active
           let notActiveTickets = currentTickets.filter(
             (ticket) => ticket.isActive == false
@@ -535,21 +607,27 @@ async function giveCasksOnline(
             (ticketId) => !notActiveTickets.includes(ticketId)
           );
 
+          // отправляем вообщение об выиграной игре
           let winMessage = {
             method: "winGame",
             winners: finalists.winners.tickets,
             bank: bank,
             winnersAmount: amountOfWinnerTickets,
             isJackpotWon,
+            jackpotData,
+            winnersData: finalists.winners.data,
           };
 
           // обновление баланса и статистики
 
           let winnerTickets = [];
+          let loserTickets = [];
 
           allTickets.forEach((ticket) => {
             if (finalists.winners.tickets.includes(ticket.id)) {
               winnerTickets.push(ticket);
+            } else {
+              loserTickets.push(ticket);
             }
           });
 
@@ -584,7 +662,6 @@ async function giveCasksOnline(
                 );
                 if (userCandidate) {
                   userCandidate.winSum += userWinSum;
-                  loserIds.push(user.id);
                 } else {
                   userIds.push(user.id);
                   userObjects.push({
@@ -593,6 +670,14 @@ async function giveCasksOnline(
                     loseSum: 0,
                   });
                 }
+              }
+            }
+          }
+
+          for (const ticket of loserTickets) {
+            for (const user of allUsers) {
+              if (user.id == ticket.userId) {
+                loserIds.push(user.id);
               }
             }
           }
@@ -667,7 +752,7 @@ async function giveCasksOnline(
                 {
                   moneyLotoLost:
                     stats.find((stat) => stat.userId == user.id).moneyLotoLost +
-                    bet *
+                    fullBet *
                       allTickets.filter((ticket) => ticket.userId == user.id)
                         .length,
                   gameLotoPlayed:
@@ -743,7 +828,7 @@ async function giveCasksOnline(
             roomsFunctions.sendAll(aWss, "updateAllRoomsPrevBank", {
               prevBank: prevBank,
             });
-          }, 10000);
+          }, 20000);
           return;
         }
 
@@ -862,15 +947,19 @@ async function getAllRoomsFinishTimers(aWss) {
   }
 }
 
-async function handleJackpotWin(roomId, jackpotWinner, allUsers, aWss) {
-  const roomsJackpots = await roomsFunctions.checkAllJackpots();
-  const jackpotSum = roomsJackpots[`room${roomId}`];
-
+async function handleJackpotWin(
+  roomId,
+  jackpotWinner,
+  allUsers,
+  jackpotSum,
+  aWss
+) {
   // обновляем статистику и баланс победителю
   const winner = allUsers.find((user) => user.id == jackpotWinner);
+
   await User.update(
     { balance: winner.balance + jackpotSum },
-    { where: { id: winner.id } }
+    { where: { id: +winner.id } }
   );
   const winnerStats = await Stats.findOne({
     where: { userId: jackpotWinner },
@@ -881,6 +970,7 @@ async function handleJackpotWin(roomId, jackpotWinner, allUsers, aWss) {
     },
     { where: { userId: jackpotWinner } }
   );
+  await LotoGame.update({ jackpot: 0 }, { where: { gameLevel: roomId } });
 
   // рассылаем всем сообщение о выиграше джекпота
   for (const client of aWss.clients) {
@@ -967,4 +1057,149 @@ function generateCasks() {
   }
 
   return shuffleArray(lotoCard[0]);
+}
+
+function generateFakeBotCard(lastIndex, casks) {
+  const lastNumber = casks[lastIndex];
+  const pastCasks = casks.slice(0, lastIndex);
+
+  let card = generateLotoCard();
+  // check if all numbers are in past casks
+  let isCardValid = false;
+  while (!isCardValid) {
+    isCardValid = true;
+    for (let i = 0; i < 27; i++) {
+      if (card.cards[i] != " ") {
+        if (!pastCasks.includes(card.cards[i])) {
+          isCardValid = false;
+        }
+      }
+    }
+
+    if (!isCardValid) {
+      card = generateLotoCard();
+    }
+  }
+
+  // insert last number in its column instead of existing number
+  let isInserted = false;
+  for (let i = 0; i < 3; i++) {
+    let index = i * 9 + Math.floor(lastNumber / 10) - 1;
+    if (card.cards[index] != " " && !isInserted) {
+      isInserted = true;
+      card.cards[index] = lastNumber;
+    }
+  }
+
+  return card;
+}
+
+function generateRandomNumbersWithoutRepeats(min, max, count) {
+  if (count > max - min + 1) {
+    throw new Error("Can't generate random numbers without repeats");
+  }
+
+  let numbers = [];
+  while (numbers.length < count) {
+    let randomNumber = Math.floor(Math.random() * (max - min + 1)) + min;
+    if (!numbers.includes(randomNumber)) {
+      numbers.push(randomNumber);
+    }
+  }
+
+  return numbers;
+}
+
+const deleteNumbers = (card) => {
+  const newCard = [...card];
+  // delete 4 numbers from each row
+
+  for (let i = 0; i < 3; i++) {
+    let row = newCard.slice(i * 9, i * 9 + 9);
+    let numbers = [];
+    for (let j = 0; j < 9; j++) {
+      if (row[j] != " ") {
+        numbers.push(j);
+      }
+    }
+
+    let numbersToDelete = generateRandomNumbersWithoutRepeats(0, 8, 4);
+    numbersToDelete.forEach((number) => {
+      row[number] = " ";
+    });
+
+    for (let j = 0; j < 9; j++) {
+      newCard[i * 9 + j] = row[j];
+    }
+  }
+
+  return newCard;
+};
+
+function generateLotoCard() {
+  let card = [];
+
+  for (let i = 0; i < 27; i++) {
+    card.push(0);
+  }
+
+  for (let i = 1; i <= 9; i++) {
+    const column = generateRandomNumbersWithoutRepeats(i * 10 - 9, i * 10, 3);
+
+    for (let j = 0; j < 3; j++) {
+      let index = j * 9 + i - 1;
+      card[index] = column[j];
+    }
+  }
+
+  let isValid = false;
+  let newCard;
+
+  while (!isValid) {
+    isValid = true;
+    newCard = deleteNumbers(card);
+
+    for (let i = 0; i < 9; i++) {
+      if (
+        newCard[i] == " " &&
+        newCard[i + 9] == " " &&
+        newCard[i + 18] == " "
+      ) {
+        isValid = false;
+      }
+    }
+
+    let rows = [];
+    for (let i = 1; i <= 3; i++) {
+      for (let j = 0; j < 9; j++) {
+        rows.push(newCard[j]);
+      }
+    }
+
+    // check if each row has 5 numbers
+    for (let i = 0; i < 27; i += 9) {
+      let row = rows.slice(i, i + 9);
+      let count = 0;
+      row.forEach((cell) => {
+        if (cell != " ") {
+          count++;
+        }
+      });
+
+      if (count != 5) {
+        isValid = false;
+      }
+    }
+  }
+
+  // make unique id
+  let id = "";
+  for (let i = 0; i < 27; i++) {
+    if (newCard[i] != " ") {
+      id += newCard[i];
+    }
+  }
+  id += new Date().getTime();
+
+  return { cards: newCard };
 }

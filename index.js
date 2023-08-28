@@ -97,6 +97,13 @@ const start = async () => {
     //   winChance: 20,
     // });
 
+    // await Stats.create({
+    //   userId: 1,
+    // });
+    // await Stats.create({
+    //   userId: 4,
+    // });
+
     app.listen(PORT, () => console.log(`Server started on PORT = ${PORT}`));
   } catch (e) {
     console.log(e);
@@ -232,7 +239,6 @@ app.ws("/game", (ws, req) => {
         }
         break;
       case "cancelCard":
-        console.log("msg.cardId:", msg.cardId);
         const cardId = msg.cardId;
         await LotoCard.update({ isActive: false }, { where: { id: cardId } });
     }
@@ -240,18 +246,18 @@ app.ws("/game", (ws, req) => {
 
   ws.on("close", async (status, msg) => {
     if (status > 1000) {
-      let roomOnline = await checkPeopleOnline();
-      let gameStates = await LotoGame.findAll();
+      // let roomOnline = await checkPeopleOnline();
+      // let gameStates = await LotoGame.findAll();
 
-      for (const game of gameStates) {
-        if (
-          game.bots > 0 &&
-          Boolean(game.isStarted) == false &&
-          Boolean(game.isWaiting) == false
-        ) {
-          await lotoAdminService.deleteBots(roomOnline);
-        }
-      }
+      // for (const game of gameStates) {
+      //   if (
+      //     game.bots > 0 &&
+      //     Boolean(game.isStarted) == false &&
+      //     Boolean(game.isWaiting) == false
+      //   ) {
+      //     await lotoAdminService.deleteBots(roomOnline);
+      //   }
+      // }
 
       // removeTimeout(roomOnline);
 
