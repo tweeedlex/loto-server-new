@@ -170,7 +170,7 @@ class GameService {
         const card = JSON.parse(ticket.card);
         const userName = ticket.user.username;
 
-        finalists.winners.data.push({ userName, card });
+        finalists.winners.data.push({ userName, card, ticketId });
       });
       // {userName: bebra, card: [fdf, fdf, dfd]}, {userName: bebra, card: [fdf12, fdf4, dfd]}
 
@@ -267,8 +267,6 @@ class GameService {
             break;
         }
       }
-
-      console.log(finalists);
 
       // добавляем в базу информацию когда текущая игра заканчивается.
       await LotoGame.update(
@@ -606,6 +604,22 @@ async function giveCasksOnline(
           finalists.winners.tickets = finalists.winners.tickets.filter(
             (ticketId) => !notActiveTickets.includes(ticketId)
           );
+          console.log(finalists);
+
+          // filter finalists.winners.data, delete tickets that are not active
+
+          finalists.winners.data.filter((ticket) => {
+            ticket.cards = ticket.cards.filter((card) => {
+              return !card.some((number) => !casks.includes(number));
+            });
+          });
+
+          // delete users that dont have tickets from finalists.winners.data
+          finalists.winners.data = finalists.winners.data.filter(
+            (data) => data.cards.length > 0
+          );
+
+          // {userName: bebra, cards: [[fdf, fdf, dfd], [fdf12, fdf4, dfd]]}
 
           // отправляем вообщение об выиграной игре
           let winMessage = {
