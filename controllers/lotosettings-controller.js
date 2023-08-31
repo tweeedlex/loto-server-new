@@ -19,11 +19,25 @@ class LotoSettingsController {
 
   async updateSetting(req, res) {
     try {
-      const { allowBots, maxBots, maxTickets, winChance, jackpot } = req.body;
+      const {
+        allowBots,
+        maxBots,
+        maxTickets,
+        winChance,
+        jackpot,
+        maxCasksJackpot,
+        canBotWinJackpot,
+      } = req.body;
       const gameLevel = req.params.id;
       if (
         !gameLevel ||
-        (!allowBots && !maxBots && !maxTickets && !winChance && !jackpot)
+        (!allowBots &&
+          !maxBots &&
+          !maxTickets &&
+          !winChance &&
+          !jackpot &&
+          !maxCasksJackpot &&
+          !canBotWinJackpot)
       ) {
         return res
           .status(400)
@@ -31,7 +45,14 @@ class LotoSettingsController {
       }
 
       await LotoSetting.update(
-        { allowBots, maxBots, maxTickets, winChance },
+        {
+          allowBots,
+          maxBots,
+          maxTickets,
+          winChance,
+          maxCasksJackpot,
+          canBotWinJackpot,
+        },
         { where: { gameLevel } }
       );
       await LotoGame.update({ jackpot }, { where: { gameLevel } });

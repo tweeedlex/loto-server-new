@@ -7,6 +7,7 @@ const {
   Stats,
   BotStats,
   UserGame,
+  Bot,
 } = require("../models/db-models");
 const lotoAdminService = require("./loto-admin-service");
 const roomsFunctions = require("./loto-rooms-functions");
@@ -164,36 +165,36 @@ class GameService {
       });
       finalists.winners.index = minimum;
 
-      finalists.winners.data = [];
-      finalists.winners.tickets.forEach((ticketId) => {
-        const ticket = lotoCards.find((ticket) => ticket.id == ticketId);
-        const card = JSON.parse(ticket.card);
-        const userName = ticket.user.username;
+      // finalists.winners.data = [];
+      // finalists.winners.tickets.forEach((ticketId) => {
+      //   const ticket = lotoCards.find((ticket) => ticket.id == ticketId);
+      //   const card = JSON.parse(ticket.card);
+      //   const userName = ticket.user.username;
 
-        finalists.winners.data.push({ userName, card, ticketId });
-      });
-      // {userName: bebra, card: [fdf, fdf, dfd]}, {userName: bebra, card: [fdf12, fdf4, dfd]}
+      //   finalists.winners.data.push({ userName, card, ticketId });
+      // });
+      // // {userName: bebra, card: [fdf, fdf, dfd]}, {userName: bebra, card: [fdf12, fdf4, dfd]}
 
-      finalists.winners.data = finalists.winners.data.reduce(
-        (result, currentItem) => {
-          const existingUser = result.find(
-            (user) => user.userName === currentItem.userName
-          );
+      // finalists.winners.data = finalists.winners.data.reduce(
+      //   (result, currentItem) => {
+      //     const existingUser = result.find(
+      //       (user) => user.userName === currentItem.userName
+      //     );
 
-          if (existingUser) {
-            existingUser.cards.push(currentItem.card);
-          } else {
-            result.push({
-              userName: currentItem.userName,
-              cards: [currentItem.card],
-            });
-          }
+      //     if (existingUser) {
+      //       existingUser.cards.push(currentItem.card);
+      //     } else {
+      //       result.push({
+      //         userName: currentItem.userName,
+      //         cards: [currentItem.card],
+      //       });
+      //     }
 
-          return result;
-        },
-        []
-      );
-      // {userName: bebra, cards: [[fdf, fdf, dfd], [fdf12, fdf4, dfd]]}
+      //     return result;
+      //   },
+      //   []
+      // );
+      // = > {userName: bebra, cards: [[fdf, fdf, dfd], [fdf12, fdf4, dfd]]}
 
       let botWinnerIndex = 90;
 
@@ -204,17 +205,9 @@ class GameService {
         } else {
           botWinnerIndex = 16;
         }
-        const randomUserdata = await axios.get(
-          "https://random-data-api.com/api/v2/users"
-        );
-        // let botInfo = { userName: "Top4ik" };
-        let botInfo = { userName: randomUserdata.data.first_name };
-        botInfo.cards = [
-          generateFakeBotCard(finalists.winners.index, casks).cards,
-        ];
+
         finalists.winners.index = botWinnerIndex;
         finalists.winners.tickets = [];
-        finalists.winners.data = [botInfo];
 
         // получаем статистику ботов (в какой комнате выиграли)
         const botStat = await BotStats.findOne({ where: { id: 1 } });
@@ -271,7 +264,7 @@ class GameService {
       // добавляем в базу информацию когда текущая игра заканчивается.
       await LotoGame.update(
         {
-          finishesAt: new Date().getTime() + minimum * 1000 + 15000,
+          finishesAt: new Date().getTime() + minimum * 1000 + 25000,
           isStarted: true,
         },
         { where: { gameLevel: msg.roomId } }
@@ -322,7 +315,7 @@ class GameService {
         }
       }
 
-      // записываем статистику боту
+      // записываем статистику ботам
       const botStat = await BotStats.findOne({ where: { id: 1 } });
       await BotStats.update(
         {
@@ -334,8 +327,21 @@ class GameService {
         },
         { where: { id: botStat.id } }
       );
+      // if (isBotWon) {
+      //   const bots = await Bot.findAll();
+      //   const randomBot = bots[Math.floor(Math.random() * bots.length)];
+      //   let { tokens } = roomsFunctions.getRoomCommisionInfo(msg.roomId);
+      //   await randomBot.update({
+      //     moneyLotoWon:
+      //       randomBot.moneyLotoWon + lotoCards.length * roomComminsionInfo.bet,
+      //     lotoTokens: randomBot.lotoTokens + tokens,
+      //   });
+      // }
 
       // делаем онлайн выдачу карточек и расчет времени игры
+
+      console.log(finalists);
+
       await giveCasksOnline(
         aWss,
         msg.roomId,
@@ -346,7 +352,8 @@ class GameService {
         botsTicketsNum,
         roomComminsionInfo.bet,
         roomComminsionInfo.fullBet,
-        game
+        game,
+        settings
       );
     } catch (error) {
       console.log(error);
@@ -510,7 +517,8 @@ async function giveCasksOnline(
   botsTicketsNum,
   bet,
   fullBet,
-  game
+  game,
+  settings
 ) {
   let winnerCaskId = finalists.winners.index;
   let left1Ids = finalists.left1;
@@ -529,7 +537,8 @@ async function giveCasksOnline(
     let left1Cask = 0;
     let isJackpotWon = false;
     let jackpotData = { isJackpotWon: false };
-    const jackpotCheckLimit = 70;
+    const jackpotCheckLimit = settings.maxCasksJackpot;
+    const canBotWinJackpot = settings.canBotWinJackpot;
 
     const allTickets = await LotoCard.findAll({
       where: { gameLevel: roomId },
@@ -555,7 +564,40 @@ async function giveCasksOnline(
 
         // проверка на джекпот
         if (game.jackpot > jackpotAnimationSum) {
-          if (pastCasks.length < jackpotCheckLimit) {
+          if (canBotWinJackpot) {
+            if (pastCasks.length === 10) {
+              // make bot win jackpot
+              await LotoGame.update(
+                { jackpot: 0 },
+                { where: { gameLevel: roomId } }
+              );
+
+              const bots = await Bot.findAll();
+              const randomBot = bots[Math.floor(Math.random() * bots.length)];
+              await randomBot.update({
+                moneyLotoWon: randomBot.moneyLotoWon + jackpotSum,
+              });
+              isJackpotWon = true;
+              jackpotData.isJackpotWon = true;
+              jackpotData.jackpotWinnerName = randomBot.username;
+
+              for (const client of aWss.clients) {
+                if (client.roomId == roomId) {
+                  client.send(
+                    JSON.stringify({
+                      method: "jackpotWon",
+                      winner: 0,
+                      winnerName: randomBot.username,
+                      sum: jackpotSum,
+                    })
+                  );
+                }
+              }
+            }
+          }
+          console.log(pastCasks.length, jackpotCheckLimit);
+          console.log(pastCasks.length < jackpotCheckLimit, !canBotWinJackpot);
+          if (pastCasks.length < jackpotCheckLimit && !canBotWinJackpot) {
             if (!isJackpotWon) {
               const jackpotWinner = checkJackpotWon(allTickets, pastCasks);
               if (jackpotWinner) {
@@ -604,21 +646,68 @@ async function giveCasksOnline(
           finalists.winners.tickets = finalists.winners.tickets.filter(
             (ticketId) => !notActiveTickets.includes(ticketId)
           );
-          console.log(finalists);
 
-          // filter finalists.winners.data, delete tickets that are not active
+          finalists.winners.data = [];
+          if (finalists.winners.tickets.length > 0) {
+            finalists.winners.tickets.forEach((ticketId) => {
+              const ticket = currentTickets.find(
+                (ticket) => ticket.id == ticketId
+              );
+              const card = JSON.parse(ticket.card);
+              const userName = ticket.user.username;
 
-          finalists.winners.data.filter((ticket) => {
-            ticket.cards = ticket.cards.filter((card) => {
-              return !card.some((number) => !casks.includes(number));
+              finalists.winners.data.push({ userName, card, ticketId });
             });
-          });
+            // {userName: bebra, card: [fdf, fdf, dfd]}, {userName: bebra, card: [fdf12, fdf4, dfd]}
+
+            finalists.winners.data = finalists.winners.data.reduce(
+              (result, currentItem) => {
+                const existingUser = result.find(
+                  (user) => user.userName === currentItem.userName
+                );
+
+                if (existingUser) {
+                  existingUser.cards.push(currentItem.card);
+                } else {
+                  result.push({
+                    userName: currentItem.userName,
+                    cards: [currentItem.card],
+                  });
+                }
+
+                return result;
+              },
+              []
+            );
+          } else {
+            const bots = await Bot.findAll();
+            const randomBot = bots[Math.floor(Math.random() * bots.length)];
+            let roomComminsionInfo =
+              roomsFunctions.getRoomCommisionInfo(roomId);
+            console.log(roomComminsionInfo);
+            await randomBot.update({
+              moneyLotoWon: randomBot.moneyLotoWon + bank,
+              lotoTokens: randomBot.lotoTokens + roomComminsionInfo.tokens,
+            });
+
+            let botInfo = { userName: randomBot.username };
+            botInfo.cards = [
+              generateFakeBotCard(finalists.winners.index, casks).cards,
+            ];
+            finalists.winners.index = winnerCaskId;
+            finalists.winners.tickets = [];
+            finalists.winners.data = [botInfo];
+          }
+
+          console.log(finalists);
+          console.log(finalists.winners.data);
 
           // delete users that dont have tickets from finalists.winners.data
           finalists.winners.data = finalists.winners.data.filter(
             (data) => data.cards.length > 0
           );
 
+          console.log(finalists.winners.data);
           // {userName: bebra, cards: [[fdf, fdf, dfd], [fdf12, fdf4, dfd]]}
 
           // отправляем вообщение об выиграной игре
@@ -930,6 +1019,7 @@ function checkJackpotWon(tickets, pastCasks) {
       }
     }
   }
+  console.log(jackpotWinner);
   return jackpotWinner;
 }
 

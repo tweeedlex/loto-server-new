@@ -7,6 +7,7 @@ const cors = require("cors");
 const cookieParser = require("cookie-parser");
 const router = require("./router/index");
 const errorMiddleware = require("./middlewares/error-middleware");
+const axios = require("axios");
 const { Sequelize } = require("sequelize");
 const {
   Loto,
@@ -15,6 +16,7 @@ const {
   LotoSetting,
   Stats,
   BotStats,
+  Bot,
 } = require("./models/db-models");
 const AdminLotoService = require("./service/loto-admin-service");
 const gameService = require("./service/game-service");
@@ -40,6 +42,14 @@ const start = async () => {
     await sequelize.authenticate();
     await sequelize.sync();
 
+    // for (let i = 0; i < 20; i++) {
+    //   const randomUserdata = await axios.get(
+    //     "https://random-data-api.com/api/v2/users"
+    //   );
+    //   const username = randomUserdata.data.first_name;
+    //   await Bot.create({ username });
+    // }
+
     // await LotoGame.update(
     //   {
     //     bots: 0,
@@ -62,21 +72,21 @@ const start = async () => {
     // await LotoGame.create({ gameLevel: 5 });
     // await LotoSetting.create({
     //   gameLevel: 1,
-    //   allowBots: 1,
+    //   allowBots: true,
     //   maxBots: 4,
     //   maxTickets: 6,
     //   winChance: 20,
     // });
     // await LotoSetting.create({
     //   gameLevel: 2,
-    //   allowBots: 1,
+    //   allowBots: true,
     //   maxBots: 4,
     //   maxTickets: 6,
     //   winChance: 20,
     // });
     // await LotoSetting.create({
     //   gameLevel: 3,
-    //   allowBots: 1,
+    //   allowBots: true,
     //   maxBots: 4,
     //   maxTickets: 6,
     //   winChance: 20,
@@ -84,14 +94,14 @@ const start = async () => {
 
     // await LotoSetting.create({
     //   gameLevel: 4,
-    //   allowBots: 1,
+    //   allowBots: true,
     //   maxBots: 4,
     //   maxTickets: 6,
     //   winChance: 20,
     // });
     // await LotoSetting.create({
     //   gameLevel: 5,
-    //   allowBots: 1,
+    //   allowBots: true,
     //   maxBots: 4,
     //   maxTickets: 6,
     //   winChance: 20,
