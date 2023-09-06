@@ -1,6 +1,5 @@
 const bcrypt = require("bcrypt");
 const uuid = require("uuid");
-const mailService = require("./mail-service");
 const tokenService = require("./token-service");
 const UserDto = require("../dtos/user-dto");
 const ApiError = require("../exceptions/api-error");
@@ -11,6 +10,7 @@ const {
   Stats,
   BotStats,
   Bot,
+  UserGame,
 } = require("../models/db-models");
 
 class UserService {
@@ -94,15 +94,22 @@ class UserService {
   async getLeaders(gameType) {
     let allStats = await Stats.findAll({ include: User });
     const bots = await Bot.findAll();
+    const allUserGames = await UserGame.findAll();
 
     if (gameType == "loto") {
       //получаем всех юзеров з лото
       let lotoStats = [];
       allStats.forEach((user) => {
         if (user.gameLotoPlayed > 0) {
+          const userGames = allUserGames.filter(
+            (game) => game.userId == user.userId
+          );
+          const userWins = userGames.filter(
+            (game) => game.isWinner == true
+          ).length;
           let userDto = {
             username: user.user.username,
-            moneyWon: user.moneyLotoWon,
+            gamesWon: userWins,
             tokens: user.lotoTokens,
           };
           lotoStats.push(userDto);
@@ -112,7 +119,7 @@ class UserService {
         if (bot.lotoTokens > 0) {
           let botDto = {
             username: bot.username,
-            moneyWon: bot.moneyLotoWon,
+            gamesWon: bot.gameLotoWon,
             tokens: bot.lotoTokens,
           };
           lotoStats.push(botDto);

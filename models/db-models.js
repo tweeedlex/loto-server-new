@@ -28,16 +28,17 @@ const Stats = sequelize.define("stat", {
     autoIncrement: true,
   },
   moneyLotoWon: { type: DataTypes.FLOAT, defaultValue: 0 },
-  moneyDominoWon: { type: DataTypes.FLOAT, defaultValue: 0 },
-  moneyNardsWon: { type: DataTypes.FLOAT, defaultValue: 0 },
   moneyLotoLost: { type: DataTypes.FLOAT, defaultValue: 0 },
-  moneyDominoLost: { type: DataTypes.FLOAT, defaultValue: 0 },
-  moneyNardsLost: { type: DataTypes.FLOAT, defaultValue: 0 },
   lotoTokens: { type: DataTypes.FLOAT, defaultValue: 0 },
-  dominoTokens: { type: DataTypes.FLOAT, defaultValue: 0 },
-  nardsTokens: { type: DataTypes.FLOAT, defaultValue: 0 },
+  lotoTokensBalance: { type: DataTypes.FLOAT, defaultValue: 0 },
   gameLotoPlayed: { type: DataTypes.INTEGER, defaultValue: 0 },
+  moneyDominoWon: { type: DataTypes.FLOAT, defaultValue: 0 },
+  moneyDominoLost: { type: DataTypes.FLOAT, defaultValue: 0 },
   gameDominoPlayed: { type: DataTypes.INTEGER, defaultValue: 0 },
+  dominoTokens: { type: DataTypes.FLOAT, defaultValue: 0 },
+  moneyNardsWon: { type: DataTypes.FLOAT, defaultValue: 0 },
+  moneyNardsLost: { type: DataTypes.FLOAT, defaultValue: 0 },
+  nardsTokens: { type: DataTypes.FLOAT, defaultValue: 0 },
   gameNardsPlayed: { type: DataTypes.INTEGER, defaultValue: 0 },
   deposited: { type: DataTypes.FLOAT, defaultValue: 0 },
   withdrawn: { type: DataTypes.FLOAT, defaultValue: 0 },
@@ -157,7 +158,9 @@ const LotoSetting = sequelize.define("lotosetting", {
   maxTickets: { type: DataTypes.INTEGER, defaultValue: 0 },
   winChance: { type: DataTypes.FLOAT, defaultValue: 0 },
   maxCasksJackpot: { type: DataTypes.INTEGER, defaultValue: 60 },
+  minJackpotSum: { type: DataTypes.FLOAT, defaultValue: 0 },
   canBotWinJackpot: { type: DataTypes.BOOLEAN, defaultValue: true },
+  jackpotWinChance: { type: DataTypes.FLOAT, defaultValue: 0 },
 });
 
 const Bot = sequelize.define("bot", {
@@ -169,8 +172,44 @@ const Bot = sequelize.define("bot", {
     autoIncrement: true,
   },
   username: { type: DataTypes.STRING, allowNull: false },
-  moneyLotoWon: { type: DataTypes.FLOAT, defaultValue: 0 },
+  gameLotoWon: { type: DataTypes.INTEGER, defaultValue: 0 },
   lotoTokens: { type: DataTypes.FLOAT, defaultValue: 0 },
+});
+
+const CurrencyRate = sequelize.define("currencyrate", {
+  id: {
+    type: DataTypes.INTEGER,
+    primaryKey: true,
+    unique: true,
+    allowNull: false,
+  },
+  rate: { type: DataTypes.FLOAT },
+});
+
+const Payout = sequelize.define("payout", {
+  id: {
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
+    primaryKey: true,
+    unique: true,
+    allowNull: false,
+  },
+  withdrawAmount: { type: DataTypes.FLOAT },
+  cardNumber: { type: DataTypes.STRING },
+  cardHolder: { type: DataTypes.STRING },
+  validity: { type: DataTypes.STRING },
+  checked: { type: DataTypes.BOOLEAN, defaultValue: false },
+});
+
+const Deposit = sequelize.define("deposit", {
+  id: {
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
+    primaryKey: true,
+    unique: true,
+    allowNull: false,
+  },
+  depositAmount: { type: DataTypes.FLOAT },
 });
 
 User.hasOne(Stats);
@@ -185,6 +224,12 @@ Token.belongsTo(User);
 User.hasMany(LotoCard);
 LotoCard.belongsTo(User);
 
+User.hasMany(Payout);
+Payout.belongsTo(User);
+
+User.hasMany(Deposit);
+Deposit.belongsTo(User);
+
 module.exports = {
   User,
   Token,
@@ -195,4 +240,7 @@ module.exports = {
   BotStats,
   UserGame,
   Bot,
+  CurrencyRate,
+  Payout,
+  Deposit,
 };

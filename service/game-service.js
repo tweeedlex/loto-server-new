@@ -13,7 +13,6 @@ const lotoAdminService = require("./loto-admin-service");
 const roomsFunctions = require("./loto-rooms-functions");
 const axios = require("axios");
 const { literal } = require("sequelize");
-
 class GameService {
   async startLotoGame(ws, aWss, msg) {
     try {
@@ -48,9 +47,23 @@ class GameService {
         });
 
         const botBank = botsTicketsNum * roomComminsionInfo.bet;
+
+        const date = await axios.get(
+          "https://timeapi.io/api/Time/current/zone?timeZone=Europe/London",
+          {
+            headers: {
+              "Content-Type": "application/json",
+            },
+          }
+        );
+
+        const time = new Date(date.data.dateTime).getTime();
+
+        // 2023-09-04T20:02:37.7381177
+
         await LotoGame.update(
           {
-            finishesAt: new Date().getTime() + 76 * 1000 + 15000,
+            finishesAt: time,
             isStarted: true,
           },
           { where: { gameLevel: msg.roomId } }
@@ -96,6 +109,13 @@ class GameService {
       const settings = await LotoSetting.findOne({
         where: { gameLevel: msg.roomId },
       });
+
+      const canBotWinJackpot = settings.canBotWinJackpot;
+      let isBotWonJackpot = false;
+      if (canBotWinJackpot) {
+        const botJackpotChance = +settings.jackpotWinChance / 100;
+        isBotWonJackpot = Math.random() <= botJackpotChance;
+      }
 
       const botChance = +settings.winChance / 100;
 
@@ -262,9 +282,19 @@ class GameService {
       }
 
       // добавляем в базу информацию когда текущая игра заканчивается.
+      const date = await axios.get(
+        "https://timeapi.io/api/Time/current/zone?timeZone=Europe/London",
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      const time = new Date(date.data.dateTime).getTime();
+      console.log(time);
       await LotoGame.update(
         {
-          finishesAt: new Date().getTime() + minimum * 1000 + 25000,
+          finishesAt: time,
           isStarted: true,
         },
         { where: { gameLevel: msg.roomId } }
@@ -278,6 +308,12 @@ class GameService {
             finalists[`left${i}`].push(ticketIndexes.cellsArrayIds[i]);
           }
         });
+      }
+
+      // проверяем играется ли ждекпот в этой игре
+      let isJackpotPlaying = false;
+      if (game.jackpot > settings.minJackpotSum) {
+        isJackpotPlaying = true;
       }
 
       // отправляем месседж о начале игры
@@ -309,6 +345,7 @@ class GameService {
             bank: (lotoCards.length + botsTicketsNum) * roomComminsionInfo.bet,
             method: "openGame",
             jackpot: game.jackpot,
+            isJackpotPlaying: isJackpotPlaying,
             roomId: msg.roomId,
           };
           client.send(JSON.stringify(openGameMsg));
@@ -327,18 +364,6 @@ class GameService {
         },
         { where: { id: botStat.id } }
       );
-      // if (isBotWon) {
-      //   const bots = await Bot.findAll();
-      //   const randomBot = bots[Math.floor(Math.random() * bots.length)];
-      //   let { tokens } = roomsFunctions.getRoomCommisionInfo(msg.roomId);
-      //   await randomBot.update({
-      //     moneyLotoWon:
-      //       randomBot.moneyLotoWon + lotoCards.length * roomComminsionInfo.bet,
-      //     lotoTokens: randomBot.lotoTokens + tokens,
-      //   });
-      // }
-
-      // делаем онлайн выдачу карточек и расчет времени игры
 
       console.log(finalists);
 
@@ -353,7 +378,8 @@ class GameService {
         roomComminsionInfo.bet,
         roomComminsionInfo.fullBet,
         game,
-        settings
+        settings,
+        isBotWonJackpot
       );
     } catch (error) {
       console.log(error);
@@ -482,8 +508,18 @@ class GameService {
         await this.startLotoGame(ws, aWss, msg);
       }, 30000);
 
+      const date = await axios.get(
+        "https://timeapi.io/api/Time/current/zone?timeZone=Europe/London",
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+      const dateNow = new Date(date.data.dateTime);
+
       // запуск таймера
-      await game.update({ isWaiting: true, startedAt: new Date().getTime() });
+      await game.update({ isWaiting: true, startedAt: dateNow.getTime() });
       // msg.startedAt = new Date();
       // отправка информации на клиентов в комнате
       for (const client of aWss.clients) {
@@ -491,11 +527,12 @@ class GameService {
           let roomTimerMsg = {
             room: msg.roomId,
             method: "updateRoomTimer",
-            startedAt: new Date(),
+            startedAt: dateNow,
           };
           client.send(JSON.stringify(roomTimerMsg));
         }
       }
+
       // отправка всем о начале игры в меню
       let roomsStartTimer = await roomsFunctions.getAllRoomsStartTimers();
       roomsFunctions.sendAll(aWss, "allRoomsStartTimers", {
@@ -518,15 +555,15 @@ async function giveCasksOnline(
   bet,
   fullBet,
   game,
-  settings
+  settings,
+  isBotWonJackpot
 ) {
   let winnerCaskId = finalists.winners.index;
   let left1Ids = finalists.left1;
   let left2Ids = finalists.left2;
   let left3Ids = finalists.left3;
 
-  let { tokens, jackpotAnimationSum } =
-    roomsFunctions.getRoomCommisionInfo(roomId);
+  let { tokens } = roomsFunctions.getRoomCommisionInfo(roomId);
 
   await sendCasksWithDelay(casks, winnerCaskId, roomId);
   async function sendCasksWithDelay(casks, winnerCaskId, roomId) {
@@ -538,7 +575,6 @@ async function giveCasksOnline(
     let isJackpotWon = false;
     let jackpotData = { isJackpotWon: false };
     const jackpotCheckLimit = settings.maxCasksJackpot;
-    const canBotWinJackpot = settings.canBotWinJackpot;
 
     const allTickets = await LotoCard.findAll({
       where: { gameLevel: roomId },
@@ -563,8 +599,8 @@ async function giveCasksOnline(
         broadcastGame(aWss, roomId, caskMessage);
 
         // проверка на джекпот
-        if (game.jackpot > jackpotAnimationSum) {
-          if (canBotWinJackpot) {
+        if (game.jackpot > settings.minJackpotSum) {
+          if (isBotWonJackpot) {
             if (pastCasks.length === 10) {
               // make bot win jackpot
               await LotoGame.update(
@@ -574,9 +610,7 @@ async function giveCasksOnline(
 
               const bots = await Bot.findAll();
               const randomBot = bots[Math.floor(Math.random() * bots.length)];
-              await randomBot.update({
-                moneyLotoWon: randomBot.moneyLotoWon + jackpotSum,
-              });
+
               isJackpotWon = true;
               jackpotData.isJackpotWon = true;
               jackpotData.jackpotWinnerName = randomBot.username;
@@ -595,9 +629,8 @@ async function giveCasksOnline(
               }
             }
           }
-          console.log(pastCasks.length, jackpotCheckLimit);
-          console.log(pastCasks.length < jackpotCheckLimit, !canBotWinJackpot);
-          if (pastCasks.length < jackpotCheckLimit && !canBotWinJackpot) {
+
+          if (pastCasks.length < jackpotCheckLimit && !isBotWonJackpot) {
             if (!isJackpotWon) {
               const jackpotWinner = checkJackpotWon(allTickets, pastCasks);
               if (jackpotWinner) {
@@ -647,6 +680,8 @@ async function giveCasksOnline(
             (ticketId) => !notActiveTickets.includes(ticketId)
           );
 
+          let randomBot;
+
           finalists.winners.data = [];
           if (finalists.winners.tickets.length > 0) {
             finalists.winners.tickets.forEach((ticketId) => {
@@ -681,12 +716,12 @@ async function giveCasksOnline(
             );
           } else {
             const bots = await Bot.findAll();
-            const randomBot = bots[Math.floor(Math.random() * bots.length)];
+            randomBot = bots[Math.floor(Math.random() * bots.length)];
             let roomComminsionInfo =
               roomsFunctions.getRoomCommisionInfo(roomId);
-            console.log(roomComminsionInfo);
+
             await randomBot.update({
-              moneyLotoWon: randomBot.moneyLotoWon + bank,
+              gameLotoWon: randomBot.gameLotoWon + 1,
               lotoTokens: randomBot.lotoTokens + roomComminsionInfo.tokens,
             });
 
@@ -746,9 +781,43 @@ async function giveCasksOnline(
           );
           const usersIdsInRoom = usersInRoom.map((user) => user.id);
 
+          // даем ботам токены
+
+          const bots = await Bot.findAll();
+          const botIds = bots.map((bot) => bot.id);
+          const botsAmountInRoom = game.bots;
+          const botsAmountInBase = bots.length;
+          const randomBotIds = [];
+
+          let isSelected = false;
+
+          while (!isSelected) {
+            if (botsAmountInRoom === randomBotIds.length) {
+              isSelected = true;
+            }
+
+            const randomBotId =
+              botIds[Math.floor(Math.random() * botsAmountInBase)];
+            if (!randomBotIds.includes(randomBotId)) {
+              randomBotIds.push(randomBotId);
+            }
+          }
+
+          // победившему боту дали токены раньше
+
+          if (randomBot) {
+            randomBotIds.pop();
+          }
+
+          await Bot.update(
+            { lotoTokens: literal(`lotoTokens + ${tokens}`) },
+            { where: { id: randomBotIds } }
+          );
+
           await Stats.update(
             {
               lotoTokens: literal(`lotoTokens + ${tokens}`),
+              lotoTokensBalance: literal(`lotoTokensBalance + ${tokens}`),
             },
             { where: { userId: usersIdsInRoom } }
           );
@@ -907,6 +976,7 @@ async function giveCasksOnline(
           roomsFunctions.sendAll(aWss, "updateAllRoomsBank", {
             bank: roomsBet,
           });
+
           setTimeout(async () => {
             // удалить все сокеты которые остались
             for (const client of aWss.clients) {
@@ -930,6 +1000,18 @@ async function giveCasksOnline(
             let prevBank = await roomsFunctions.getAllPrevBets();
             roomsFunctions.sendAll(aWss, "updateAllRoomsPrevBank", {
               prevBank: prevBank,
+            });
+
+            // отправка всем о конце игры в меню
+            let roomsFinishTimer =
+              await roomsFunctions.getAllRoomsFinishTimers();
+            roomsFunctions.sendAll(aWss, "allRoomsFinishTimers", {
+              timers: roomsFinishTimer,
+            });
+            // отправка всем о начале игры в меню
+            let roomsStartTimer = await roomsFunctions.getAllRoomsStartTimers();
+            roomsFunctions.sendAll(aWss, "allRoomsStartTimers", {
+              timers: roomsStartTimer,
             });
           }, 20000);
           return;
@@ -979,7 +1061,7 @@ async function giveCasksOnline(
         }
 
         index++;
-        setTimeout(sendNextCask, 1000); // 2-second delay
+        setTimeout(sendNextCask, 4000); // 2-second delay
       }
     }
 
@@ -1019,7 +1101,7 @@ function checkJackpotWon(tickets, pastCasks) {
       }
     }
   }
-  console.log(jackpotWinner);
+
   return jackpotWinner;
 }
 

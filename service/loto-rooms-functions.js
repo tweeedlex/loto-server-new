@@ -1,6 +1,5 @@
 const bcrypt = require("bcrypt");
 const uuid = require("uuid");
-const mailService = require("./mail-service");
 const tokenService = require("./token-service");
 const UserDto = require("../dtos/user-dto");
 const ApiError = require("../exceptions/api-error");
@@ -52,11 +51,6 @@ class RoomsService {
     };
 
     const allGames = await LotoGame.findAll();
-    // for (let room = 1; room <= 5; room++) {
-    //   const game = allGames.find((game) => game.gameLevel == room);
-    //   console.log(allGames);
-    //   roomsJackpot[`room${room}`] = game.jackpot;
-    // }
 
     allGames.forEach((game) => {
       roomsJackpot[`room${game.gameLevel}`] = game.jackpot;
@@ -75,29 +69,6 @@ class RoomsService {
   }
 
   async checkJackpot(ws, aWss, msg) {
-    // let roomComminsionInfo = this.getRoomCommisionInfo(msg.roomId);
-    // let cardsInRoom = await LotoCard.findAll({
-    //   where: { gameLevel: msg.roomId },
-    // });
-
-    // const botsTickets = JSON.parse(gameInfo.botsTickets).reduce(
-    //   (acc, ticket) => acc + Number(ticket),
-    //   0
-    // );
-
-    // await gameInfo.update({
-    //   jackpot:
-    //     gameInfo.jackpot +
-    //     (cardsInRoom.length + gameInfo.bots) * roomComminsionInfo.jackpotPart,
-    // });
-
-    // let botsTicketsNum = 0;
-    // let botsTicketsArr = JSON.parse(gameInfo.botsTickets);
-
-    // botsTicketsArr.forEach((ticket) => {
-    //   botsTicketsNum += Number(ticket);
-    // });
-
     let gameInfo = await LotoGame.findOne({ where: { gameLevel: msg.roomId } });
 
     for (const client of aWss.clients) {
@@ -179,12 +150,6 @@ class RoomsService {
       }
     });
 
-    // let roomsCards = {
-    //     room1: [card, card, card],
-    //     room2: [card, card, card],
-    //     room3: [card, card, card],
-    //   };
-
     // отправка даных
     for (let room = 1; room <= 5; room++) {
       let thisRoomInfo = gameInfo[room - 1];
@@ -218,10 +183,6 @@ class RoomsService {
     };
 
     const rooms = await LotoGame.findAll();
-    // for (let gameLevel = 1; gameLevel <= 5; gameLevel++) {
-    //   const room = rooms.find((room) => room.gameLevel == gameLevel);
-    //   roomTimers[`room${gameLevel}`] = room.startedAt;
-    // }
 
     rooms.forEach((room) => {
       roomTimers[`room${room.gameLevel}`] = room.startedAt;
@@ -240,10 +201,6 @@ class RoomsService {
     };
 
     const rooms = await LotoGame.findAll();
-    // for (let gameLevel = 1; gameLevel <= 5; gameLevel++) {
-    //   const room = rooms.find((room) => room.gameLevel == gameLevel);
-    //   roomTimers[`room${gameLevel}`] = room.finishesAt;
-    // }
 
     rooms.forEach((room) => {
       roomTimers[`room${room.gameLevel}`] = room.finishesAt;
