@@ -237,40 +237,12 @@ app.ws("/game", (ws, req) => {
         break;
 
       case "connectGame":
-        // let timerStarted;
-        // // get online (bots and players) in room
-        // const gameState = await LotoGame.findOne({
-        //   where: { gameLevel: msg.roomId },
-        // });
-
-        // if (gameState.isWaiting && gameState.startedAt != null) {
-        //   timerStarted = true;
-        // } else timerStarted = false;
-
-        // let roomOnlineWithBots = await checkPeopleOnline(msg.roomId);
-
-        // roomOnlineWithBots += gameState.bots;
-
-        // // начало игры
-        // if (roomOnlineWithBots >= 3 && gameState.isWaiting == false) {
-        //   if (!timerStarted) {
-        //     setTimeout(async () => {
-        //       await gameService.startLotoGame(ws, aWss, msg);
-        //     }, 30000);
-        //   }
-        // }
         await gameConnectionHandler(ws, msg);
 
         await gameService.startRoomLobby(ws, aWss, msg);
 
         await gameService.checkBet(ws, aWss, msg);
         await roomsFunctions.checkJackpot(ws, aWss, msg);
-
-        // // отправка всем о ставке в меню
-        // let gameRoomsBet = await roomsFunctions.checkAllBets();
-        // roomsFunctions.sendAll(aWss, "updateAllRoomsBank", {
-        //   bank: gameRoomsBet,
-        // });
 
         break;
       case "buyTickets":
@@ -428,24 +400,6 @@ const checkPeopleOnline = async (roomId = null) => {
       });
 
       rooms[`room${roomId}`] = roomOnline;
-
-      // if (roomOnline == 0) {
-      //   let lotoGameInfo = await LotoGame.findOne({
-      //     where: { gameLevel: roomId },
-      //   });
-
-      //   if (lotoGameInfo.isStarted != true) {
-      //     await LotoGame.update(
-      //       { startedAt: null, isStarted: false, isWaiting: false },
-      //       {
-      //         where: { gameLevel: roomId },
-      //       }
-      //     );
-      //     // await LotoCard.destroy({
-      //     //   where: { gameLevel: roomId },
-      //     // });
-      //   }
-      // }
     }
     return rooms;
   }
@@ -490,6 +444,8 @@ const broadcastGame = async (ws, msg) => {
 
   roomOnline += game.bots;
 
+  let bank = await roomsFunctions.checkRoomBet(msg.roomId);
+
   // отправка информации на клиентов в комнате
   for (const client of aWss.clients) {
     if (client.roomId == msg.roomId) {
@@ -497,6 +453,7 @@ const broadcastGame = async (ws, msg) => {
       msg.users = users;
       msg.startedAt = game.startedAt;
       msg.isJackpotPlaying = isJackpotPlaying;
+      msg.bank = bank;
       client.send(JSON.stringify(msg));
     }
   }

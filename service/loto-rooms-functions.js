@@ -114,6 +114,37 @@ class RoomsService {
     return roomsPrevBank;
   }
 
+  async checkRoomBet(roomId) {
+    let roomBet = 0;
+    // получение информации о всех играх
+    let gameInfo = await LotoGame.findAll();
+    // получение всех билетов в базе
+    let cardsInRoom = await LotoCard.findAll({});
+    // console.log(cardsInRoom);
+
+    let roomsCards = [];
+
+    cardsInRoom.forEach((card) => {
+      roomsCards.push(card);
+    });
+
+    // отправка даных
+
+    let thisRoomInfo = gameInfo[roomId - 1];
+    let roomComminsionInfo = this.getRoomCommisionInfo(roomId);
+
+    let botsTicketsNum = 0;
+    let botsTicketsArr = JSON.parse(thisRoomInfo.botsTickets);
+
+    botsTicketsArr.forEach((ticket) => {
+      botsTicketsNum += Number(ticket);
+    });
+
+    roomBet = (roomsCards.length + botsTicketsNum) * roomComminsionInfo.bet;
+
+    return roomBet;
+  }
+
   async checkAllBets() {
     let roomsBet = {
       room1: 0,

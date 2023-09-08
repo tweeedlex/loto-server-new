@@ -1065,7 +1065,10 @@ async function giveCasksOnline(
       }
     }
 
-    sendNextCask(); // Start the process
+    // отправка первого боченка
+    setTimeout(() => {
+      sendNextCask(); // Start the process
+    }, 3000);
   }
 }
 
