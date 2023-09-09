@@ -25,6 +25,7 @@ router.get("/getCurrencyRate", authMiddleware, userController.getCurrencyRate);
 router.post("/createPayout", authMiddleware, userController.createPayout);
 router.get("/getPayouts", authMiddleware, userController.getPayouts);
 router.put("/checkPayouts", authMiddleware, userController.checkPayouts);
+router.put("/updateUserData", authMiddleware, userController.changeUserData);
 
 // login
 

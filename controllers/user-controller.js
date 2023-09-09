@@ -297,6 +297,33 @@ class UserController {
       next(e);
     }
   }
+
+  async changeUserData(req, res, next) {
+    try {
+      const userId = req.user.id;
+      const { name, email } = req.body;
+
+      const userCandidate = await User.findOne({ where: { id: userId } });
+
+      const candidateEmail = await User.findOne({ where: { email } });
+      if (candidateEmail && candidateEmail.email !== userCandidate.email) {
+        throw ApiError.BadRequest(`ERR_EMAIL_ALREADY_EXISTS`);
+      }
+
+      await User.update(
+        { name: name, email: email },
+        { where: { id: userId } }
+      );
+
+      return res.json({
+        newName: name,
+        newEmail: email,
+      });
+    } catch (e) {
+      console.log(e);
+      next(e);
+    }
+  }
 }
 
 module.exports = new UserController();

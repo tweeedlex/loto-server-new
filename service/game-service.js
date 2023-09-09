@@ -1061,7 +1061,7 @@ async function giveCasksOnline(
         }
 
         index++;
-        setTimeout(sendNextCask, 4000); // 2-second delay
+        setTimeout(sendNextCask, 4000); // 4-second delay
       }
     }
 
