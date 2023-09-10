@@ -426,6 +426,12 @@ class GameService {
         return false;
       }
 
+      // check if user is playing in this room
+      const game = await LotoGame.findOne({ where: { gameLevel: msg.roomId } });
+      if (game.isStarted) {
+        return false;
+      }
+
       const newBalance =
         user.balance - tickets.length * roomComminsionInfo.fullBet;
 
@@ -1068,7 +1074,7 @@ async function giveCasksOnline(
     // отправка первого боченка
     setTimeout(() => {
       sendNextCask(); // Start the process
-    }, 3000);
+    }, 1000);
   }
 }
 
