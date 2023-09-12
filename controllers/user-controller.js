@@ -101,7 +101,8 @@ class UserController {
   async getLeaders(req, res, next) {
     try {
       let { gameType } = req.params;
-      const users = await userService.getLeaders(gameType);
+      let userId = req.user.id;
+      const users = await userService.getLeaders(gameType, userId);
       return res.json(users);
     } catch (e) {
       next(e);
@@ -273,7 +274,6 @@ class UserController {
       const users = await User.findAll({
         include: [Payout, Stats, Deposit],
       });
-      console.log(users);
       let usersWithPayouts = [];
       for (let user of users) {
         if (user.payouts.length > 0 || user.deposits.length > 0) {

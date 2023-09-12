@@ -72,12 +72,12 @@ const start = async () => {
       await getCurrency();
     }, 1000 * 60 * 60 * 24);
 
-    // for (let i = 0; i < 20; i++) {
+    // for (let i = 0; i < 90; i++) {
     //   const randomUserdata = await axios.get(
     //     "https://random-data-api.com/api/v2/users"
     //   );
     //   const username = randomUserdata.data.first_name;
-    //   await Bot.create({ username });
+    //   await Bot.create({ username, lotoTokens: 1 });
     // }
 
     // await LotoGame.update(

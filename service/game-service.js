@@ -512,7 +512,7 @@ class GameService {
 
       setTimeout(async () => {
         await this.startLotoGame(ws, aWss, msg);
-      }, 30000);
+      }, 60000);
 
       const date = await axios.get(
         "https://timeapi.io/api/Time/current/zone?timeZone=Europe/London",

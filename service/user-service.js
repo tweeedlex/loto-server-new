@@ -91,7 +91,8 @@ class UserService {
     return user;
   }
 
-  async getLeaders(gameType) {
+  async getLeaders(gameType, userId) {
+    let user = await User.findOne({ where: { id: userId } });
     let allStats = await Stats.findAll({ include: User });
     const bots = await Bot.findAll();
     const allUserGames = await UserGame.findAll();
@@ -125,6 +126,37 @@ class UserService {
           lotoStats.push(botDto);
         }
       });
+
+      // проверка есть ли текущий человек в списке лидеров
+
+      let isUserInArr = false;
+      lotoStats.forEach((lotoUserStat) => {
+        if (lotoUserStat.username == user.username) {
+          isUserInArr = true;
+        }
+      });
+      if (isUserInArr == false) {
+        const userGames = allUserGames.filter(
+          (game) => game.userId == user.userId
+        );
+        const userWins = userGames.filter(
+          (game) => game.isWinner == true
+        ).length;
+        let lotoTokens = 0;
+        allStats.forEach((userStat) => {
+          if (userStat.username == user.username) {
+            lotoTokens = userStat.lotoTokens;
+          }
+        });
+        let userDto = {
+          username: user.username,
+          gamesWon: userWins,
+          tokens: lotoTokens,
+        };
+
+        lotoStats.push(userDto);
+      }
+
       return lotoStats;
     } else if (gameType == "nards") {
       //получаем всех юзеров з лото
