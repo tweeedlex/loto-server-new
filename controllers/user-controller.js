@@ -17,7 +17,7 @@ class UserController {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
-        return next(ApiError.BadRequest("Validation error", errors.array()));
+        return next(ApiError.BadRequest("ERR_VALIDATION", errors.array()));
       }
       const { username, name, email, password } = req.body;
       const userData = await userService.registrationUser(

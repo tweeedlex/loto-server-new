@@ -17,14 +17,12 @@ class UserService {
   async registrationUser(username, name, email, password) {
     const candidateEmail = await User.findOne({ where: { email } });
     if (candidateEmail) {
-      throw ApiError.BadRequest(`Аккаунт с почтой ${email} уже существует`);
+      throw ApiError.BadRequest(`ERR_EMAIL_ALREADY_EXISTS`);
     }
 
     const candidateUsername = await User.findOne({ where: { username } });
     if (candidateUsername) {
-      throw ApiError.BadRequest(
-        `Аккаунт с никнеймом ${username} уже существует`
-      );
+      throw ApiError.BadRequest("ERR_USERNAME_ALREADY_EXISTS");
     }
     const hashPassword = await bcrypt.hash(password, 3);
 

@@ -108,6 +108,74 @@ class AdminLotoService {
   //   }, Math.round(Math.random() * 1000 + 500));
   // }
 
+  async deleteBotsInRoom(aWss, msg) {
+    setTimeout(async () => {
+      const prev = await LotoGame.findOne({ where: { gameLevel: msg.roomId } });
+      await LotoGame.update(
+        {
+          bots: 0,
+          botsTickets: JSON.stringify([]),
+        },
+        { where: { gameLevel: msg.roomId } }
+      );
+
+      let roomOnline = 0;
+      aWss.clients.forEach((client) => {
+        if (client.roomId == msg.roomId) {
+          roomOnline++;
+        }
+      });
+      aWss.clients.forEach((client) => {
+        if (client.roomId == msg.roomId) {
+          msg.method = "updateOnline";
+          msg.online = roomOnline;
+          client.send(JSON.stringify(msg));
+        }
+      });
+      let roomComminsionInfo = roomsFunctions.getRoomCommisionInfo(msg.roomId);
+      let cardsInRoom = await LotoCard.findAll({
+        where: { gameLevel: msg.roomId },
+      });
+      for (const client of aWss.clients) {
+        if (client.roomId == msg.roomId) {
+          const message = {
+            method: "updateBank",
+            bank: cardsInRoom.length * roomComminsionInfo.bet,
+          };
+          client.send(JSON.stringify(message));
+        }
+      }
+
+      // отправка всем об онлайне в меню
+      let allRoomsOnline = await roomsFunctions.getAllRoomsOnline(aWss);
+      roomsFunctions.sendAll(aWss, "allRoomsOnline", {
+        rooms: allRoomsOnline,
+      });
+      // отправка всем о джекпотах в меню
+      let allRoomsJackpots = await roomsFunctions.checkAllJackpots();
+      roomsFunctions.sendAll(aWss, "updateAllRoomsJackpot", {
+        jackpots: allRoomsJackpots,
+      });
+      // отправка всем о ставке в меню
+      let allRoomsBet = await roomsFunctions.checkAllBets();
+      roomsFunctions.sendAll(aWss, "updateAllRoomsBank", {
+        bank: allRoomsBet,
+      });
+
+      // отправка всем о начале игры в меню
+      let allRoomsStartTimer = await roomsFunctions.getAllRoomsStartTimers();
+      roomsFunctions.sendAll(aWss, "allRoomsStartTimers", {
+        timers: allRoomsStartTimer,
+      });
+
+      // отправка всем о конце игры в меню
+      let allRoomsFinishTimer = await roomsFunctions.getAllRoomsFinishTimers();
+      roomsFunctions.sendAll(aWss, "allRoomsFinishTimers", {
+        timers: allRoomsFinishTimer,
+      });
+    }, Math.round(Math.random() * 1000 + 500));
+  }
+
   async deleteBots(roomOnline, roomId = null) {
     if (roomId) {
       await LotoGame.update(

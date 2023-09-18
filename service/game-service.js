@@ -507,9 +507,12 @@ class GameService {
 
     roomOnline += game.bots;
 
-    if (roomOnline >= 3 && game.isWaiting == false) {
+    if (roomOnline == 3 && game.isWaiting == false) {
       // начало игры
 
+      // setTimeout(async () => {
+      //   await this.startLotoGame(ws, aWss, msg);
+      // }, 20000);
       setTimeout(async () => {
         await this.startLotoGame(ws, aWss, msg);
       }, 60000);
@@ -925,7 +928,7 @@ async function giveCasksOnline(
 
           // обновляем статистику всем проигравшим, добавляем в статистику проигрыш и количество игр
           for (const user of allUsers) {
-            if (loserIds.includes(user.id)) {
+            if (loserIds.includes(user.id) && !userIds.includes(user.id)) {
               await Stats.update(
                 {
                   moneyLotoLost:
@@ -969,25 +972,13 @@ async function giveCasksOnline(
             { where: { gameLevel: roomId } }
           );
           await LotoCard.destroy({ where: { gameLevel: roomId } });
-          // отправка всем об онлайне в меню
-          let rooms = await roomsFunctions.getAllRoomsOnline(aWss);
-          roomsFunctions.sendAll(aWss, "allRoomsOnline", { rooms: rooms });
-          // отправка всем о джекпотах в меню
-          let roomsJackpots = await roomsFunctions.checkAllJackpots();
-          roomsFunctions.sendAll(aWss, "updateAllRoomsJackpot", {
-            jackpots: roomsJackpots,
-          });
-          // отправка всем о ставке в меню
-          let roomsBet = await roomsFunctions.checkAllBets();
-          roomsFunctions.sendAll(aWss, "updateAllRoomsBank", {
-            bank: roomsBet,
-          });
 
           setTimeout(async () => {
             // удалить все сокеты которые остались
             for (const client of aWss.clients) {
               if (client.roomId == roomId) {
-                client.close();
+                let msgMessage = { reason: "endGameLotoExit" };
+                client.close(1000, JSON.stringify(msgMessage));
               }
             }
             await LotoGame.update(
@@ -1006,6 +997,20 @@ async function giveCasksOnline(
             let prevBank = await roomsFunctions.getAllPrevBets();
             roomsFunctions.sendAll(aWss, "updateAllRoomsPrevBank", {
               prevBank: prevBank,
+            });
+
+            // отправка всем об онлайне в меню
+            let rooms = await roomsFunctions.getAllRoomsOnline(aWss);
+            roomsFunctions.sendAll(aWss, "allRoomsOnline", { rooms: rooms });
+            // отправка всем о джекпотах в меню
+            let roomsJackpots = await roomsFunctions.checkAllJackpots();
+            roomsFunctions.sendAll(aWss, "updateAllRoomsJackpot", {
+              jackpots: roomsJackpots,
+            });
+            // отправка всем о ставке в меню
+            let roomsBet = await roomsFunctions.checkAllBets();
+            roomsFunctions.sendAll(aWss, "updateAllRoomsBank", {
+              bank: roomsBet,
             });
 
             // отправка всем о конце игры в меню
@@ -1067,7 +1072,7 @@ async function giveCasksOnline(
         }
 
         index++;
-        setTimeout(sendNextCask, 4000); // 4-second delay
+        setTimeout(sendNextCask, 1000); // 4-second delay
       }
     }
 
