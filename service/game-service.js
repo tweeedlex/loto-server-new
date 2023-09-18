@@ -512,7 +512,8 @@ class GameService {
 
       // setTimeout(async () => {
       //   await this.startLotoGame(ws, aWss, msg);
-      // }, 20000);
+      // }, 10000);
+
       setTimeout(async () => {
         await this.startLotoGame(ws, aWss, msg);
       }, 60000);
@@ -1072,7 +1073,8 @@ async function giveCasksOnline(
         }
 
         index++;
-        setTimeout(sendNextCask, 1000); // 4-second delay
+        setTimeout(sendNextCask, 4000); // 4-second delay
+        // setTimeout(sendNextCask, 500);
       }
     }
 
