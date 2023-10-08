@@ -47,6 +47,7 @@ router.get("/botsStat/:gameType", authMiddleware, userController.getBots);
 router.get("/allUsersStats", authMiddleware, userController.getAllUsersStats);
 router.get("/userStats", authMiddleware, userController.getUserStats);
 router.get("/bot-wins", authMiddleware, userController.getBotWins);
+router.get("/played-games", userController.getPlayedGames);
 
 // game
 

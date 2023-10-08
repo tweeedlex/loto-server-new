@@ -8,6 +8,7 @@ const {
   BotStats,
   UserGame,
   Bot,
+  PlayedGame,
 } = require("../models/db-models");
 const lotoAdminService = require("./loto-admin-service");
 const roomsFunctions = require("./loto-rooms-functions");
@@ -105,6 +106,9 @@ class GameService {
         return;
       }
 
+      // записываем игру в историю игр
+      const { id: playedgameId } = await PlayedGame.create({});
+
       // получаем настройки комнаты и шансы бота на выиграш
       const settings = await LotoSetting.findOne({
         where: { gameLevel: msg.roomId },
@@ -184,37 +188,6 @@ class GameService {
         }
       });
       finalists.winners.index = minimum;
-
-      // finalists.winners.data = [];
-      // finalists.winners.tickets.forEach((ticketId) => {
-      //   const ticket = lotoCards.find((ticket) => ticket.id == ticketId);
-      //   const card = JSON.parse(ticket.card);
-      //   const userName = ticket.user.username;
-
-      //   finalists.winners.data.push({ userName, card, ticketId });
-      // });
-      // // {userName: bebra, card: [fdf, fdf, dfd]}, {userName: bebra, card: [fdf12, fdf4, dfd]}
-
-      // finalists.winners.data = finalists.winners.data.reduce(
-      //   (result, currentItem) => {
-      //     const existingUser = result.find(
-      //       (user) => user.userName === currentItem.userName
-      //     );
-
-      //     if (existingUser) {
-      //       existingUser.cards.push(currentItem.card);
-      //     } else {
-      //       result.push({
-      //         userName: currentItem.userName,
-      //         cards: [currentItem.card],
-      //       });
-      //     }
-
-      //     return result;
-      //   },
-      //   []
-      // );
-      // = > {userName: bebra, cards: [[fdf, fdf, dfd], [fdf12, fdf4, dfd]]}
 
       let botWinnerIndex = 90;
 
@@ -379,7 +352,8 @@ class GameService {
         roomComminsionInfo.fullBet,
         game,
         settings,
-        isBotWonJackpot
+        isBotWonJackpot,
+        playedgameId
       );
     } catch (error) {
       console.log(error);
@@ -422,6 +396,8 @@ class GameService {
       let tickets = msg.tickets;
       const user = await User.findOne({ where: { id: msg.userId } });
       // check if user has enough money
+      console.log(user.balance);
+      console.log(tickets.length * roomComminsionInfo.fullBet);
       if (user.balance < tickets.length * roomComminsionInfo.fullBet) {
         return false;
       }
@@ -516,7 +492,7 @@ class GameService {
 
       setTimeout(async () => {
         await this.startLotoGame(ws, aWss, msg);
-      }, 60000);
+      }, 10000);
 
       const date = await axios.get(
         "https://timeapi.io/api/Time/current/zone?timeZone=Europe/London",
@@ -566,7 +542,8 @@ async function giveCasksOnline(
   fullBet,
   game,
   settings,
-  isBotWonJackpot
+  isBotWonJackpot,
+  playedgameId
 ) {
   let winnerCaskId = finalists.winners.index;
   let left1Ids = finalists.left1;
@@ -906,6 +883,7 @@ async function giveCasksOnline(
                     bet: fullBet,
                     bank,
                     isJackpotWon,
+                    playedgameId,
                   });
 
                   // присылаем всем победителям сообщение о выиграше
@@ -957,6 +935,7 @@ async function giveCasksOnline(
                 bet: fullBet,
                 bank,
                 isJackpotWon,
+                playedgameId,
               });
             }
           }
@@ -978,7 +957,11 @@ async function giveCasksOnline(
             // удалить все сокеты которые остались
             for (const client of aWss.clients) {
               if (client.roomId == roomId) {
-                let msgMessage = { reason: "endGameLotoExit" };
+                let msgMessage = {
+                  reason: "endGameLotoExit",
+                  page: "mainLotoPage",
+                };
+                client.roomId = null;
                 client.close(1000, JSON.stringify(msgMessage));
               }
             }
@@ -1000,31 +983,33 @@ async function giveCasksOnline(
               prevBank: prevBank,
             });
 
-            // отправка всем об онлайне в меню
-            let rooms = await roomsFunctions.getAllRoomsOnline(aWss);
-            roomsFunctions.sendAll(aWss, "allRoomsOnline", { rooms: rooms });
-            // отправка всем о джекпотах в меню
-            let roomsJackpots = await roomsFunctions.checkAllJackpots();
-            roomsFunctions.sendAll(aWss, "updateAllRoomsJackpot", {
-              jackpots: roomsJackpots,
-            });
-            // отправка всем о ставке в меню
-            let roomsBet = await roomsFunctions.checkAllBets();
-            roomsFunctions.sendAll(aWss, "updateAllRoomsBank", {
-              bank: roomsBet,
-            });
-
-            // отправка всем о конце игры в меню
-            let roomsFinishTimer =
-              await roomsFunctions.getAllRoomsFinishTimers();
-            roomsFunctions.sendAll(aWss, "allRoomsFinishTimers", {
-              timers: roomsFinishTimer,
-            });
-            // отправка всем о начале игры в меню
-            let roomsStartTimer = await roomsFunctions.getAllRoomsStartTimers();
-            roomsFunctions.sendAll(aWss, "allRoomsStartTimers", {
-              timers: roomsStartTimer,
-            });
+            setTimeout(async () => {
+              // отправка всем об онлайне в меню
+              let rooms = await roomsFunctions.getAllRoomsOnline(aWss);
+              roomsFunctions.sendAll(aWss, "allRoomsOnline", { rooms: rooms });
+              // отправка всем о джекпотах в меню
+              let roomsJackpots = await roomsFunctions.checkAllJackpots();
+              roomsFunctions.sendAll(aWss, "updateAllRoomsJackpot", {
+                jackpots: roomsJackpots,
+              });
+              // отправка всем о ставке в меню
+              let roomsBet = await roomsFunctions.checkAllBets();
+              roomsFunctions.sendAll(aWss, "updateAllRoomsBank", {
+                bank: roomsBet,
+              });
+              // отправка всем о конце игры в меню
+              let roomsFinishTimer =
+                await roomsFunctions.getAllRoomsFinishTimers();
+              roomsFunctions.sendAll(aWss, "allRoomsFinishTimers", {
+                timers: roomsFinishTimer,
+              });
+              // отправка всем о начале игры в меню
+              let roomsStartTimer =
+                await roomsFunctions.getAllRoomsStartTimers();
+              roomsFunctions.sendAll(aWss, "allRoomsStartTimers", {
+                timers: roomsStartTimer,
+              });
+            }, 50);
           }, 20000);
           return;
         }
@@ -1073,7 +1058,7 @@ async function giveCasksOnline(
         }
 
         index++;
-        setTimeout(sendNextCask, 4000); // 4-second delay
+        setTimeout(sendNextCask, 100); // 4-second delay
         // setTimeout(sendNextCask, 500);
       }
     }

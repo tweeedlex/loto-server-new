@@ -9,6 +9,7 @@ const {
   CurrencyRate,
   Payout,
   Deposit,
+  PlayedGame,
 } = require("../models/db-models");
 const tokenService = require("../service/token-service");
 
@@ -292,6 +293,19 @@ class UserController {
       const { ids } = req.body;
       await Payout.update({ checked: true }, { where: { id: ids } });
       return res.status(200).json({ message: "OK" });
+    } catch (e) {
+      console.log(e);
+      next(e);
+    }
+  }
+
+  async getPlayedGames(req, res, next) {
+    try {
+      const playedGames = await PlayedGame.findAll({
+        include: UserGame,
+      });
+
+      return res.status(200).json(playedGames);
     } catch (e) {
       console.log(e);
       next(e);

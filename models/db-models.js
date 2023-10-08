@@ -212,6 +212,58 @@ const Deposit = sequelize.define("deposit", {
   depositAmount: { type: DataTypes.FLOAT },
 });
 
+const PlayedGame = sequelize.define("playedgame", {
+  id: {
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
+    primaryKey: true,
+    unique: true,
+    allowNull: false,
+  },
+});
+
+const DominoGame = sequelize.define("dominoGame", {
+  id: {
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
+    primaryKey: true,
+    unique: true,
+    allowNull: false,
+  },
+  startedAt: { type: DataTypes.DATE },
+  isStarted: { type: DataTypes.BOOLEAN, defaultValue: false },
+  roomId: { type: DataTypes.INTEGER, allowNull: false },
+  tableId: { type: DataTypes.INTEGER, allowNull: false },
+  playerMode: { type: DataTypes.INTEGER, allowNull: false },
+  gameMode: { type: DataTypes.STRING, allowNull: false },
+  turn: { type: DataTypes.STRING, defaultValue: "" },
+  turnTime: { type: DataTypes.DATE, defaultValue: null },
+  turnQueue: { type: DataTypes.JSON, defaultValue: "[]" },
+  scene: { type: DataTypes.JSON, defaultValue: "[]" },
+  market: { type: DataTypes.JSON, defaultValue: "[]" },
+});
+
+const DominoGamePlayer = sequelize.define("dominoGamePlayer", {
+  id: {
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
+    primaryKey: true,
+    unique: true,
+    allowNull: false,
+  },
+  tiles: { type: DataTypes.JSON, defaultValue: "[]" },
+  points: { type: DataTypes.INTEGER, defaultValue: 0 },
+});
+
+DominoGame.hasMany(DominoGamePlayer);
+DominoGamePlayer.belongsTo(DominoGame);
+
+User.hasOne(DominoGamePlayer);
+DominoGamePlayer.belongsTo(User);
+
+PlayedGame.hasMany(UserGame);
+UserGame.belongsTo(PlayedGame);
+
 User.hasOne(Stats);
 Stats.belongsTo(User);
 
@@ -243,4 +295,7 @@ module.exports = {
   CurrencyRate,
   Payout,
   Deposit,
+  PlayedGame,
+  DominoGame,
+  DominoGamePlayer,
 };

@@ -32,10 +32,13 @@ class AdminLotoService {
           Math.random() * (setting.maxTickets - 0.01) + 1
         );
 
+        // [3], [4], [1]
+
         let newBotsTickets = JSON.stringify([
           ...JSON.parse(prev.botsTickets || "[]"),
           number,
         ]);
+
         let bots = (+prev.bots || 0) + 1;
 
         await LotoGame.update(
@@ -77,12 +80,19 @@ class AdminLotoService {
         await gameService.checkBet(ws, aWss, msg);
         await roomsFunctions.checkJackpot(ws, aWss, msg);
 
-        // отправка всем о джекпотах в меню
+        // обновление джекпота
+        // let botsTickets = 0;
+        // JSON.parse(newBotsTickets).forEach((botTickets) => {
+        //   botsTickets += +botTickets;
+        // });
+
         await roomsFunctions.updateJackpot(
           msg.roomId,
-          JSON.parse(newBotsTickets.length) * roomComminsionInfo.jackpotPart,
+          number * roomComminsionInfo.jackpotPart,
           prev
         );
+
+        // отправка всем о джекпотах в меню
         let roomsJackpots = await roomsFunctions.checkAllJackpots();
         roomsFunctions.sendAll(aWss, "updateAllRoomsJackpot", {
           jackpots: roomsJackpots,
@@ -97,16 +107,6 @@ class AdminLotoService {
       }
     }, Math.round(Math.random() * 5000));
   }
-
-  // async deleteBot(ws, aWss, msg) {
-  //   setTimeout(async () => {
-  //     const prev = await LotoGame.findOne({ where: { gameLevel: msg.roomId } });
-  //     await LotoGame.update(
-  //       { bots: (+prev.bots || 0) - 1, botsTickets: JSON.stringify(JSON.parse()) },
-  //       { where: { gameLevel: msg.roomId } }
-  //     );
-  //   }, Math.round(Math.random() * 1000 + 500));
-  // }
 
   async deleteBotsInRoom(aWss, msg) {
     setTimeout(async () => {

@@ -27,4 +27,6 @@ router.get("/get-messages", gameController.getMessages);
 router.post("/test", gameController.test);
 router.post("/start", authMiddleware, gameController.start);
 
+router.get("/domino-status", authMiddleware, gameController.getDominoStatus);
+
 module.exports = router;
