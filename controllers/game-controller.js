@@ -487,6 +487,34 @@ class GameController {
       console.log(e);
     }
   }
+
+  async isDominoStarted(req, res) {
+    try {
+      const userId = req.user.id;
+      let { roomId, tableId, playerMode, gameMode } = req.body;
+
+      const dominoGame = await DominoGame.findOne({
+        where: {
+          roomId: roomId,
+          tableId: tableId,
+          playerMode: playerMode,
+          gameMode: gameMode,
+        },
+        include: DominoGamePlayer,
+      });
+
+      if (
+        dominoGame.startedAt != null &&
+        !dominoGame.dominoGamePlayers.find((player) => player.userId === userId)
+      ) {
+        return res.status(200).json({ allow: false });
+      }
+
+      return res.status(200).json({ allow: true });
+    } catch (e) {
+      console.log(e);
+    }
+  }
 }
 
 module.exports = new GameController();

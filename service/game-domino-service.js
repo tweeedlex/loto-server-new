@@ -12,6 +12,7 @@ const {
   PlayedGame,
   DominoGame,
   DominoGamePlayer,
+  DominoUserGame,
 } = require("../models/db-models");
 const lotoAdminService = require("./loto-admin-service");
 const roomsFunctions = require("./loto-rooms-functions");
@@ -28,7 +29,21 @@ class dominoGameService {
 
   async startLobby(ws, aWss, msg, startTurn) {
     // console.log("startDominoLobby");
-
+    // find users in this table
+    const usersInThisTable = [];
+    for (const client of aWss.clients) {
+      if (
+        client.roomId == msg.roomId &&
+        client.tableId == msg.tableId &&
+        client.playerMode == msg.playerMode &&
+        client.gameMode == msg.gameMode
+      ) {
+        usersInThisTable.push({
+          userId: client.userId,
+          username: client.username,
+        });
+      }
+    }
     // получаем игру
     let dominoGame = await DominoGame.findOne({
       where: {
@@ -37,12 +52,33 @@ class dominoGameService {
         playerMode: msg.playerMode,
         gameMode: msg.gameMode,
       },
+      include: DominoGamePlayer,
     });
 
     // если игра началась то прерываемся
     if (dominoGame.isStarted) {
       return;
     }
+
+    const betInfo = this.getDominoRoomBetInfo(msg.dominoRoomId);
+
+    usersInThisTable.forEach(async (player) => {
+      await DominoGamePlayer.create({
+        userId: player.userId,
+        dominoGameId: dominoGame.id,
+      });
+      // take money
+      await User.update(
+        {
+          balance: literal(`balance - ${betInfo.bet}`),
+        },
+        {
+          where: {
+            id: player.userId,
+          },
+        }
+      );
+    });
 
     let date = await axios.get(
       "https://timeapi.io/api/Time/current/zone?timeZone=Europe/London",
@@ -67,6 +103,7 @@ class dominoGameService {
         },
       }
     );
+
     // получаем обновленную игру
     dominoGame = await DominoGame.findOne({
       where: {
@@ -75,44 +112,10 @@ class dominoGameService {
         playerMode: msg.playerMode,
         gameMode: msg.gameMode,
       },
+      include: DominoGamePlayer,
     });
 
-    // find users in this table
-    const usersInThisTable = [];
-    for (const client of aWss.clients) {
-      if (
-        client.roomId == msg.roomId &&
-        client.tableId == msg.tableId &&
-        client.playerMode == msg.playerMode &&
-        client.gameMode == msg.gameMode
-      ) {
-        usersInThisTable.push({
-          userId: client.userId,
-          username: client.username,
-        });
-      }
-    }
     // console.log("usersInThisTable", usersInThisTable.length, usersInThisTable);
-
-    const betInfo = this.getDominoRoomBetInfo(msg.dominoRoomId);
-
-    usersInThisTable.forEach(async (player) => {
-      await DominoGamePlayer.create({
-        userId: player.userId,
-        dominoGameId: dominoGame.id,
-      });
-      // take money
-      await User.update(
-        {
-          balance: literal(`balance - ${betInfo.bet}`),
-        },
-        {
-          where: {
-            id: player.userId,
-          },
-        }
-      );
-    });
 
     // отправляем на клиент сообщение о старте игр
     let timerMessage = {
@@ -145,16 +148,23 @@ class dominoGameService {
 
     // находим игрока который ходит первый
     const { playersTiles, marketTiles } = generateAndSortTiles(
+      dominoGame.dominoGamePlayers,
       msg.playerMode,
-      turnQueue
+      turnQueue,
+      msg.gameMode
     );
 
     // console.log("playerTiles ", playersTiles);
 
     // обновляем игру и добавляем очередь ходов
+    let scene = createEmptyScene();
 
     await DominoGame.update(
-      { isStarted: true, turnQueue: JSON.stringify(turnQueue) },
+      {
+        isStarted: true,
+        turnQueue: JSON.stringify(turnQueue),
+        scene: JSON.stringify(scene),
+      },
       { where: { id: dominoGame.id } }
     );
 
@@ -213,7 +223,9 @@ class dominoGameService {
       gameMessage.players = usersInThisTable;
       gameMessage.market = marketTiles;
       gameMessage.turn = firstPlayerId;
-      gameMessage.turnTime = turnTime;
+      gameMessage.turnTime = turnTime + 10000;
+      gameMessage.continued = false;
+      gameMessage.scene = scene;
       gameMessage.method = "startDominoGameTable";
 
       // запускаем отчет следующего хода
@@ -225,7 +237,7 @@ class dominoGameService {
         msg.playerMode,
         msg.gameMode,
         firstPlayerId,
-        turnTime
+        turnTime + 10000
       );
 
       // отправляем сообщение всем игрокам в комнате о начале игры
@@ -237,13 +249,10 @@ class dominoGameService {
         msg.gameMode,
         gameMessage
       );
-
-      // await this.startGame(ws, aWss);
     }, 10000);
   }
 
   async placeTile(ws, aWss, msg) {
-    console.log("placeTile " + msg);
     let tile = msg.tile;
     let sisterTile = msg.sisterTile;
     let isPlaced = false;
@@ -259,15 +268,69 @@ class dominoGameService {
 
     const scene = JSON.parse(dominoGame.scene);
 
-    if (scene.length == 0) {
+    // console.log("TOP-2", scene[Math.floor(scene.length / 2) - 3]);
+    // console.log("TOP-1", scene[Math.floor(scene.length / 2) - 2]);
+    // console.log("TOP", scene[Math.floor(scene.length / 2) - 1]);
+    // console.log("MIDDLE", scene[Math.floor(scene.length / 2)]);
+    // console.log("BOTTOM", scene[Math.floor(scene.length / 2) + 1]);
+
+    if (msg.gameMode == "CLASSIC") {
+      let isPlaced = await this.placeClassicTile(
+        ws,
+        aWss,
+        tile,
+        scene,
+        dominoGame,
+        msg
+      );
+      return isPlaced;
+    } else {
+      let isPlaced = await this.placeTelephoneTile(
+        ws,
+        aWss,
+        tile,
+        scene,
+        dominoGame,
+        msg
+      );
+      return isPlaced;
+    }
+  }
+
+  countTiles(scene) {
+    let tilesAmount = 0;
+    scene.forEach((row) => {
+      row.forEach((tile) => {
+        if (tile?.id >= 0) {
+          tilesAmount++;
+        }
+      });
+    });
+    return tilesAmount;
+  }
+
+  async placeClassicTile(ws, aWss, tile, scene, dominoGame, msg) {
+    let isPlaced = false;
+    let tilesAmount = this.countTiles(scene);
+    let sisterTile = msg.sisterTile;
+
+    // console.log("BEBRA", scene[Math.floor(scene.length / 2)]);
+
+    if (tilesAmount == 0) {
       if (tile.left == tile.right) {
-        scene.push({
+        // find central element in 2d scene
+        scene[Math.floor(scene.length / 2)][
+          Math.floor(scene[Math.floor(scene.length / 2)].length / 2)
+        ] = {
           left: tile.left,
           right: tile.right,
           id: tile.id,
           rotate: true,
-        });
+          position: "row",
+        };
+
         await dominoGame.update({ scene: JSON.stringify(scene) });
+
         await deleteUserInventoryTile(
           ws,
           aWss,
@@ -283,10 +346,14 @@ class dominoGameService {
       }
     }
 
-    if (scene.length == 1) {
-      let centralTile = scene[0];
+    if (tilesAmount == 1) {
+      let centralTile =
+        scene[Math.floor(scene.length / 2)][
+          Math.floor(scene[Math.floor(scene.length / 2)].length / 2)
+        ];
 
       if (centralTile.right == tile.left || centralTile.right == tile.right) {
+        // console.log("addTile", tile, "to", centralTile);
         await addTileToRight(
           tile,
           centralTile,
@@ -309,9 +376,24 @@ class dominoGameService {
       }
     }
 
-    if (scene.length >= 2) {
-      let rightTile = scene[scene.length - 1];
-      let leftTile = scene[0];
+    if (tilesAmount > 1) {
+      let newScene = scene[Math.floor(scene.length / 2)];
+
+      let leftTile = null;
+      let rightTile = null;
+      for (let i = 0; i < scene.length; i++) {
+        if (newScene[i]?.id >= 0 && !leftTile) {
+          leftTile = newScene[i];
+        }
+      }
+      for (let i = newScene.length - 1; i >= 0; i--) {
+        if (newScene[i]?.id >= 0 && !rightTile) {
+          rightTile = newScene[i];
+        }
+      }
+
+      // console.log("left", leftTile);
+      // console.log("right", rightTile);
 
       if (sisterTile && sisterTile == "right") {
         if (rightTile.right == tile.left || rightTile.right == tile.right) {
@@ -332,6 +414,17 @@ class dominoGameService {
             msg.gameMode,
             msg.userId
           );
+          if (msg.gameMode == "TELEPHONE") {
+            await this.addTelephoneScore(
+              aWss,
+              scene,
+              msg.userId,
+              msg.roomId,
+              msg.tableId,
+              msg.playerMode,
+              msg.gameMode
+            );
+          }
           isPlaced = true;
           return isPlaced;
         }
@@ -354,7 +447,17 @@ class dominoGameService {
             msg.gameMode,
             msg.userId
           );
-
+          if (msg.gameMode == "TELEPHONE") {
+            await this.addTelephoneScore(
+              aWss,
+              scene,
+              msg.userId,
+              msg.roomId,
+              msg.tableId,
+              msg.playerMode,
+              msg.gameMode
+            );
+          }
           isPlaced = true;
           return isPlaced;
         }
@@ -378,7 +481,17 @@ class dominoGameService {
           msg.gameMode,
           msg.userId
         );
-
+        if (msg.gameMode == "TELEPHONE") {
+          await this.addTelephoneScore(
+            aWss,
+            scene,
+            msg.userId,
+            msg.roomId,
+            msg.tableId,
+            msg.playerMode,
+            msg.gameMode
+          );
+        }
         isPlaced = true;
         return isPlaced;
       } else if (leftTile.left == tile.right || leftTile.left == tile.left) {
@@ -399,22 +512,851 @@ class dominoGameService {
           msg.gameMode,
           msg.userId
         );
+        if (msg.gameMode == "TELEPHONE") {
+          await this.addTelephoneScore(
+            aWss,
+            scene,
+            msg.userId,
+            msg.roomId,
+            msg.tableId,
+            msg.playerMode,
+            msg.gameMode
+          );
+        }
+        isPlaced = true;
+        return isPlaced;
+      }
+    }
+  }
+
+  async placeTelephoneTile(ws, aWss, tile, scene, dominoGame, msg) {
+    let isPlaced = false;
+    let tilesAmount = this.countTiles(scene);
+    let sisterTile = msg.sisterTile;
+
+    if (tilesAmount == 0) {
+      // find central element in 2d scene
+      scene[Math.floor(scene.length / 2)][
+        Math.floor(scene[Math.floor(scene.length / 2)].length / 2)
+      ] = {
+        left: tile.left,
+        right: tile.right,
+        id: tile.id,
+        rotate: tile.left == tile.right,
+        position: "row",
+      };
+
+      await dominoGame.update({ scene: JSON.stringify(scene) });
+
+      await deleteUserInventoryTile(
+        ws,
+        aWss,
+        tile,
+        msg.roomId,
+        msg.tableId,
+        msg.playerMode,
+        msg.gameMode,
+        msg.userId
+      );
+      await this.addTelephoneScore(
+        aWss,
+        scene,
+        msg.userId,
+        msg.roomId,
+        msg.tableId,
+        msg.playerMode,
+        msg.gameMode
+      );
+      isPlaced = true;
+      return isPlaced;
+    }
+
+    // console.log(3333, "tilesAmount:", tilesAmount);
+
+    if (tilesAmount == 1) {
+      let centralTile =
+        scene[Math.floor(scene.length / 2)][
+          Math.floor(scene[Math.floor(scene.length / 2)].length / 2)
+        ];
+      // console.log("CENTRAL TILE", centralTile);
+
+      if (centralTile.right == tile.left || centralTile.right == tile.right) {
+        // console.log("addTile", tile, "to", centralTile);
+        await addTileToRight(
+          tile,
+          centralTile,
+          dominoGame,
+          scene,
+          centralTile.right == tile.right
+        );
+        await deleteUserInventoryTile(
+          ws,
+          aWss,
+          tile,
+          msg.roomId,
+          msg.tableId,
+          msg.playerMode,
+          msg.gameMode,
+          msg.userId
+        );
+        await this.addTelephoneScore(
+          aWss,
+          scene,
+          msg.userId,
+          msg.roomId,
+          msg.tableId,
+          msg.playerMode,
+          msg.gameMode
+        );
+        isPlaced = true;
+        return isPlaced;
+      } else if (
+        centralTile.left == tile.left ||
+        centralTile.left == tile.right
+      ) {
+        await addTileToLeft(
+          tile,
+          centralTile,
+          dominoGame,
+          scene,
+          centralTile.left == tile.left
+        );
+        await deleteUserInventoryTile(
+          ws,
+          aWss,
+          tile,
+          msg.roomId,
+          msg.tableId,
+          msg.playerMode,
+          msg.gameMode,
+          msg.userId
+        );
+        await this.addTelephoneScore(
+          aWss,
+          scene,
+          msg.userId,
+          msg.roomId,
+          msg.tableId,
+          msg.playerMode,
+          msg.gameMode
+        );
         isPlaced = true;
         return isPlaced;
       }
     }
 
-    return isPlaced;
+    if (tilesAmount > 1) {
+      // find if there is vertical, if no, do as in classic, else find top and bottom tiles and place tile
+      const areVerticalsFilled = this.checkIfVerticalsFilled(scene);
+
+      if (!areVerticalsFilled) {
+        // same as classic but check also double tiles
+        let newScene = scene[Math.floor(scene.length / 2)];
+
+        let leftTile = null;
+        let rightTile = null;
+        let doubleTiles = [];
+        let availableDoubles = [];
+
+        for (let i = 0; i < newScene.length; i++) {
+          if (newScene[i]?.id >= 0 && !leftTile) {
+            leftTile = newScene[i];
+          }
+        }
+        for (let i = newScene.length - 1; i >= 0; i--) {
+          if (newScene[i]?.id >= 0 && !rightTile) {
+            rightTile = newScene[i];
+          }
+        }
+
+        // find all double tiles on the scene
+        newScene.forEach((tile) => {
+          if (tile?.left == tile?.right && tile?.id >= 0) {
+            doubleTiles.push(tile);
+          }
+        });
+
+        // console.log("double-tiles", doubleTiles);
+        // find all available doubles on the scene (needs to be placed between 2 tiles)
+        doubleTiles.forEach((tile) => {
+          // check if on the right and left of double there are tiles
+          const leftTile = newScene[newScene.indexOf(tile) - 1];
+          const rightTile = newScene[newScene.indexOf(tile) + 1];
+          if (
+            leftTile &&
+            rightTile &&
+            leftTile?.id >= 0 &&
+            rightTile?.id >= 0
+          ) {
+            availableDoubles.push(tile);
+          }
+        });
+
+        if (sisterTile && sisterTile == "right") {
+          if (rightTile.right == tile.left || rightTile.right == tile.right) {
+            await addTileToRight(
+              tile,
+              rightTile,
+              dominoGame,
+              scene,
+              rightTile.right == tile.right
+            );
+            await deleteUserInventoryTile(
+              ws,
+              aWss,
+              tile,
+              msg.roomId,
+              msg.tableId,
+              msg.playerMode,
+              msg.gameMode,
+              msg.userId
+            );
+            await this.addTelephoneScore(
+              aWss,
+              scene,
+              msg.userId,
+              msg.roomId,
+              msg.tableId,
+              msg.playerMode,
+              msg.gameMode
+            );
+            isPlaced = true;
+            return isPlaced;
+          }
+        } else if (sisterTile && sisterTile == "left") {
+          if (leftTile.left == tile.right || leftTile.left == tile.left) {
+            await addTileToLeft(
+              tile,
+              leftTile,
+              dominoGame,
+              scene,
+              leftTile.left == tile.left
+            );
+            await deleteUserInventoryTile(
+              ws,
+              aWss,
+              tile,
+              msg.roomId,
+              msg.tableId,
+              msg.playerMode,
+              msg.gameMode,
+              msg.userId
+            );
+            await this.addTelephoneScore(
+              aWss,
+              scene,
+              msg.userId,
+              msg.roomId,
+              msg.tableId,
+              msg.playerMode,
+              msg.gameMode
+            );
+            isPlaced = true;
+            return isPlaced;
+          }
+        } else if (sisterTile && sisterTile == "top") {
+          let middleTile = newScene.find(
+            (sceneTile) =>
+              sceneTile.left == sceneTile.right &&
+              (sceneTile.left == tile.left || sceneTile.left == tile.right)
+          );
+          if (middleTile) {
+            await addTileToTop(
+              tile,
+              middleTile,
+              dominoGame,
+              scene,
+              middleTile.left == tile.left
+            );
+            await deleteUserInventoryTile(
+              ws,
+              aWss,
+              tile,
+              msg.roomId,
+              msg.tableId,
+              msg.playerMode,
+              msg.gameMode,
+              msg.userId
+            );
+            await this.addTelephoneScore(
+              aWss,
+              scene,
+              msg.userId,
+              msg.roomId,
+              msg.tableId,
+              msg.playerMode,
+              msg.gameMode
+            );
+            isPlaced = true;
+            return isPlaced;
+          }
+        }
+
+        if (rightTile.right == tile.left || rightTile.right == tile.right) {
+          await addTileToRight(
+            tile,
+            rightTile,
+            dominoGame,
+            scene,
+            rightTile.right == tile.right
+          );
+          await deleteUserInventoryTile(
+            ws,
+            aWss,
+            tile,
+            msg.roomId,
+            msg.tableId,
+            msg.playerMode,
+            msg.gameMode,
+            msg.userId
+          );
+          await this.addTelephoneScore(
+            aWss,
+            scene,
+            msg.userId,
+            msg.roomId,
+            msg.tableId,
+            msg.playerMode,
+            msg.gameMode
+          );
+          isPlaced = true;
+          return isPlaced;
+        }
+        if (leftTile.left == tile.right || leftTile.left == tile.left) {
+          await addTileToLeft(
+            tile,
+            leftTile,
+            dominoGame,
+            scene,
+            leftTile.left == tile.left
+          );
+          await deleteUserInventoryTile(
+            ws,
+            aWss,
+            tile,
+            msg.roomId,
+            msg.tableId,
+            msg.playerMode,
+            msg.gameMode,
+            msg.userId
+          );
+          await this.addTelephoneScore(
+            aWss,
+            scene,
+            msg.userId,
+            msg.roomId,
+            msg.tableId,
+            msg.playerMode,
+            msg.gameMode
+          );
+          isPlaced = true;
+          return isPlaced;
+        }
+
+        // check for double tiles to place on top of them
+        if (availableDoubles.length > 0) {
+          let isPlaced = false;
+          for (const doubleTile of availableDoubles) {
+            if (doubleTile.left == tile.left || doubleTile.left == tile.right) {
+              await addTileToTop(
+                tile,
+                doubleTile,
+                dominoGame,
+                scene,
+                doubleTile.left == tile.left
+              );
+
+              // await addTileToBottom(
+              //   tile,
+              //   doubleTile,
+              //   dominoGame,
+              //   scene,
+              //   doubleTile.right == tile.right
+              // );
+              await deleteUserInventoryTile(
+                ws,
+                aWss,
+                tile,
+                msg.roomId,
+                msg.tableId,
+                msg.playerMode,
+                msg.gameMode,
+                msg.userId
+              );
+              await this.addTelephoneScore(
+                aWss,
+                scene,
+                msg.userId,
+                msg.roomId,
+                msg.tableId,
+                msg.playerMode,
+                msg.gameMode
+              );
+              isPlaced = true;
+            }
+          }
+
+          return isPlaced;
+        }
+      } else if (areVerticalsFilled) {
+        // same as classic but check also double tiles
+        let newScene = scene[Math.floor(scene.length / 2)];
+
+        let { top, bottom } = this.findVerticalCorners(scene);
+
+        let leftTile = null;
+        let rightTile = null;
+
+        // find all available doubles on the scene (needs to be placed between 2 tiles)
+
+        for (let i = 0; i < newScene.length; i++) {
+          if (newScene[i]?.id >= 0 && !leftTile) {
+            leftTile = newScene[i];
+          }
+        }
+        for (let i = newScene.length - 1; i >= 0; i--) {
+          if (newScene[i]?.id >= 0 && !rightTile) {
+            rightTile = newScene[i];
+          }
+        }
+
+        if (sisterTile && sisterTile == "right") {
+          if (rightTile.right == tile.left || rightTile.right == tile.right) {
+            await addTileToRight(
+              tile,
+              rightTile,
+              dominoGame,
+              scene,
+              rightTile.right == tile.right
+            );
+            await deleteUserInventoryTile(
+              ws,
+              aWss,
+              tile,
+              msg.roomId,
+              msg.tableId,
+              msg.playerMode,
+              msg.gameMode,
+              msg.userId
+            );
+            await this.addTelephoneScore(
+              aWss,
+              scene,
+              msg.userId,
+              msg.roomId,
+              msg.tableId,
+              msg.playerMode,
+              msg.gameMode
+            );
+            isPlaced = true;
+            return isPlaced;
+          }
+        } else if (sisterTile && sisterTile == "left") {
+          if (leftTile.left == tile.right || leftTile.left == tile.left) {
+            await addTileToLeft(
+              tile,
+              leftTile,
+              dominoGame,
+              scene,
+              leftTile.left == tile.left
+            );
+            await deleteUserInventoryTile(
+              ws,
+              aWss,
+              tile,
+              msg.roomId,
+              msg.tableId,
+              msg.playerMode,
+              msg.gameMode,
+              msg.userId
+            );
+            await this.addTelephoneScore(
+              aWss,
+              scene,
+              msg.userId,
+              msg.roomId,
+              msg.tableId,
+              msg.playerMode,
+              msg.gameMode
+            );
+            isPlaced = true;
+            return isPlaced;
+          }
+        } else if (sisterTile && sisterTile == "top") {
+          if (top.left == tile.right || top.left == tile.left) {
+            await addTileToTop(
+              tile,
+              top,
+              dominoGame,
+              scene,
+              top.left == tile.left
+            );
+            await deleteUserInventoryTile(
+              ws,
+              aWss,
+              tile,
+              msg.roomId,
+              msg.tableId,
+              msg.playerMode,
+              msg.gameMode,
+              msg.userId
+            );
+            await this.addTelephoneScore(
+              aWss,
+              scene,
+              msg.userId,
+              msg.roomId,
+              msg.tableId,
+              msg.playerMode,
+              msg.gameMode
+            );
+            isPlaced = true;
+            return isPlaced;
+          }
+        } else if (sisterTile && sisterTile == "bottom") {
+          if (bottom.right == tile.right || bottom.right == tile.left) {
+            await addTileToBottom(
+              tile,
+              bottom,
+              dominoGame,
+              scene,
+              bottom.right == tile.right
+            );
+            await deleteUserInventoryTile(
+              ws,
+              aWss,
+              tile,
+              msg.roomId,
+              msg.tableId,
+              msg.playerMode,
+              msg.gameMode,
+              msg.userId
+            );
+            await this.addTelephoneScore(
+              aWss,
+              scene,
+              msg.userId,
+              msg.roomId,
+              msg.tableId,
+              msg.playerMode,
+              msg.gameMode
+            );
+            isPlaced = true;
+            return isPlaced;
+          }
+        }
+
+        // ==============================
+
+        if (rightTile.right == tile.left || rightTile.right == tile.right) {
+          await addTileToRight(
+            tile,
+            rightTile,
+            dominoGame,
+            scene,
+            rightTile.right == tile.right
+          );
+          await deleteUserInventoryTile(
+            ws,
+            aWss,
+            tile,
+            msg.roomId,
+            msg.tableId,
+            msg.playerMode,
+            msg.gameMode,
+            msg.userId
+          );
+          await this.addTelephoneScore(
+            aWss,
+            scene,
+            msg.userId,
+            msg.roomId,
+            msg.tableId,
+            msg.playerMode,
+            msg.gameMode
+          );
+          isPlaced = true;
+          return isPlaced;
+        } else if (leftTile.left == tile.right || leftTile.left == tile.left) {
+          await addTileToLeft(
+            tile,
+            leftTile,
+            dominoGame,
+            scene,
+            leftTile.left == tile.left
+          );
+          await deleteUserInventoryTile(
+            ws,
+            aWss,
+            tile,
+            msg.roomId,
+            msg.tableId,
+            msg.playerMode,
+            msg.gameMode,
+            msg.userId
+          );
+          await this.addTelephoneScore(
+            aWss,
+            scene,
+            msg.userId,
+            msg.roomId,
+            msg.tableId,
+            msg.playerMode,
+            msg.gameMode
+          );
+          isPlaced = true;
+          return isPlaced;
+        }
+
+        // аставить проверку для верх\низ
+        if (top.left == tile.left || top.left == tile.right) {
+          await addTileToTop(
+            tile,
+            top,
+            dominoGame,
+            scene,
+            top.left == tile.left
+          );
+          await deleteUserInventoryTile(
+            ws,
+            aWss,
+            tile,
+            msg.roomId,
+            msg.tableId,
+            msg.playerMode,
+            msg.gameMode,
+            msg.userId
+          );
+          await this.addTelephoneScore(
+            aWss,
+            scene,
+            msg.userId,
+            msg.roomId,
+            msg.tableId,
+            msg.playerMode,
+            msg.gameMode
+          );
+          isPlaced = true;
+          return isPlaced;
+        }
+
+        if (bottom.right == tile.left || bottom.right == tile.right) {
+          await addTileToBottom(
+            tile,
+            bottom,
+            dominoGame,
+            scene,
+            bottom.right == tile.right
+          );
+          await deleteUserInventoryTile(
+            ws,
+            aWss,
+            tile,
+            msg.roomId,
+            msg.tableId,
+            msg.playerMode,
+            msg.gameMode,
+            msg.userId
+          );
+          await this.addTelephoneScore(
+            aWss,
+            scene,
+            msg.userId,
+            msg.roomId,
+            msg.tableId,
+            msg.playerMode,
+            msg.gameMode
+          );
+          isPlaced = true;
+          return isPlaced;
+        }
+      }
+    }
   }
 
-  async placeTileOnSkippedTurn(aWss, dominoGamePast, turn) {
+  async addTelephoneScore(
+    aWss,
+    scene,
+    userId,
+    roomId,
+    tableId,
+    playerMode,
+    gameMode
+  ) {
+    let score = 0;
+    const dominoGame = await DominoGame.findOne({
+      where: {
+        tableId: tableId,
+        roomId: roomId,
+        playerMode: playerMode,
+        gameMode: gameMode,
+      }
+    });
+
+    let newScene = scene[Math.floor(scene.length / 2)];
+    // let tilesAmount = this.countTiles(scene);
+    let leftTile = null;
+    let rightTile = null;
+    for (let i = 0; i < newScene.length; i++) {
+      if (newScene[i]?.id >= 0 && !leftTile) {
+        leftTile = newScene[i];
+      }
+    }
+    for (let i = newScene.length - 1; i >= 0; i--) {
+      if (newScene[i]?.id >= 0 && !rightTile) {
+        rightTile = newScene[i];
+      }
+    }
+
+    const { top, bottom } = this.findVerticalCorners(scene);
+
+    // тут
+    const availableDoubles = [];
+
+    scene = scene[Math.floor(scene.length / 2)];
+    const allDoubles = scene.filter((tile) => tile.left == tile.right);
+    allDoubles.forEach((tile) => {
+      // check if on the right and left of double there are tiles
+      const leftTile = scene[scene.indexOf(tile) - 1];
+      const rightTile = scene[scene.indexOf(tile) + 1];
+      if (leftTile && rightTile && leftTile?.id >= 0 && rightTile?.id >= 0) {
+        availableDoubles.push(tile);
+      }
+    });
+
+    const leftTileDouble = availableDoubles.some(
+      (obj) => obj.id === leftTile.id
+    );
+    const rightTileDouble = availableDoubles.some(
+      (obj) => obj.id === rightTile.id
+    );
+    let topTileDouble = null;
+    let bottomTileDouble = null;
+    if (top && bottom) {
+      topTileDouble = availableDoubles.some((obj) => obj.id === top.id);
+      bottomTileDouble = availableDoubles.some((obj) => obj.id === bottom.id);
+    }
+
+    // if (!leftTileDouble) {
+    //   if (leftTile.right == leftTile.left) {
+    //     score += leftTile.left * 2;
+    //   } else {
+    //     score += leftTile.left;
+    //   }
+    // }
+
+    // if (!rightTileDouble) {
+    //   if (rightTile.right == rightTile.left) {
+    //     score += rightTile.right * 2;
+    //   } else {
+    //     score += rightTile.right;
+    //   }
+    // }
+
+    if (leftTile && rightTile && leftTile.id == rightTile.id) {
+      if (leftTile.right == leftTile.left) {
+        score += leftTile.left * 2;
+      } else {
+        score += leftTile.left;
+        score += leftTile.right;
+      }
+    } else {
+      if (leftTile.right == leftTile.left) {
+        score += leftTile.left * 2;
+      } else {
+        score += leftTile.left;
+      }
+
+      if (rightTile.right == rightTile.left) {
+        score += rightTile.right * 2;
+      } else {
+        score += rightTile.right;
+      }
+    }
+
+    if (top && !topTileDouble) {
+      if (top.left == top.right) {
+        score += top.left * 2;
+      } else {
+        score += top.left;
+      }
+    }
+    if (bottom && !bottomTileDouble) {
+      if (bottom.left == bottom.right) {
+        score += bottom.right * 2;
+      } else {
+        score += bottom.right;
+      }
+    }
+    console.log("score", score);
+    if (score % 5 == 0) {
+      const player = await DominoGamePlayer.findOne({
+        where: {
+          dominoGameId: dominoGame.id,
+          userId: userId,
+        },
+      });
+      await DominoGamePlayer.update(
+        {
+          points: literal(`points + ${score}`),
+        },
+        {
+          where: {
+            dominoGameId: dominoGame.id,
+            userId: userId,
+          },
+        }
+      );
+      roomsFunctions.sendToClientsInTable(
+        aWss,
+        roomId,
+        tableId,
+        playerMode,
+        gameMode,
+        {
+          method: "updatePlayerScore",
+          userId,
+          score: player.points + score,
+          addedScore: score,
+        }
+      );
+
+      // get updated players array
+      const playersInRoom = await DominoGamePlayer.findAll({
+        where: {
+          dominoGameId: dominoGame.id,
+        },
+      });
+
+      // make array of just score numbers, find max
+      const scores = playersInRoom.map((player) => player.points);
+      let maxScore = 0;
+      maxScore = Math.max(...scores);
+      // send score of table to all users 
+      aWss.clients.forEach((client) => {
+        client.send(
+          JSON.stringify({
+            method: "updateTableScore",
+            roomId,
+            tableId,
+            playerMode,
+            gameMode,
+            points: maxScore,
+          })
+        );
+      });
+      return;
+    }
+  }
+
+  async placeTileOnSkippedTurn(aWss, dominoGamePast, turn, gameMode) {
+    return;
     let dominoGame = dominoGamePast;
     let roomId = dominoGame.roomId;
     let tableId = dominoGame.tableId;
     let playerMode = dominoGame.playerMode;
-    let gameMode = dominoGame.gameMode;
 
-    const scene = JSON.parse(dominoGame.scene);
+    let scene = JSON.parse(dominoGame.scene);
     const market = JSON.parse(dominoGame.market);
     const playersInRoom = dominoGame.dominoGamePlayers;
     const user = playersInRoom.find((player) => player.userId == turn);
@@ -424,25 +1366,36 @@ class dominoGameService {
         currWs = client;
       }
     });
-    // console.log("currWs", currWs.userId, currWs.username);
-    // console.log("currTurn & userId;", turn);
     if (currWs) {
       currWs.send(JSON.stringify({ method: "THIS_CLIENT_NOW" }));
     }
-    let turnAvailable = this.isTurnAvailable(JSON.parse(user.tiles), scene);
+    let turnAvailable = this.isTurnAvailable(
+      JSON.parse(user.tiles),
+      scene,
+      gameMode
+    );
 
-    if (turnAvailable) {
-      // find which tile to place (with lowest score) that can be placed on scene
-
+    if (turnAvailable && gameMode == "CLASSIC") {
+      let newScene = scene[Math.floor(scene.length / 2)];
+      let tilesAmount = this.countTiles(scene);
       const tiles = JSON.parse(user.tiles);
-
-      const leftTile = scene[0];
-      const rightTile = scene[scene.length - 1];
+      let leftTile = null;
+      let rightTile = null;
+      for (let i = 0; i < newScene.length; i++) {
+        if (newScene[i]?.id >= 0 && !leftTile) {
+          leftTile = newScene[i];
+        }
+      }
+      for (let i = newScene.length - 1; i >= 0; i--) {
+        if (newScene[i]?.id >= 0 && !rightTile) {
+          rightTile = newScene[i];
+        }
+      }
 
       let tileToPlace = null;
       const availableTilesToPlace = [];
 
-      if (scene.length == 0) {
+      if (tilesAmount == 0) {
         tiles.forEach((tile) => {
           if (tile.left == tile.right) {
             availableTilesToPlace.push(tile);
@@ -492,14 +1445,111 @@ class dominoGameService {
           );
         }
       }
-    }
-    if (!turnAvailable && market.length != 0) {
+    } else if (turnAvailable && gameMode == "TELEPHONE") {
+      let newScene = scene[Math.floor(scene.length / 2)];
+      let tilesAmount = this.countTiles(scene);
+      const tiles = JSON.parse(user.tiles);
+      let leftTile = null;
+      let rightTile = null;
+      for (let i = 0; i < newScene.length; i++) {
+        if (newScene[i]?.id >= 0 && !leftTile) {
+          leftTile = newScene[i];
+        }
+      }
+      for (let i = newScene.length - 1; i >= 0; i--) {
+        if (newScene[i]?.id >= 0 && !rightTile) {
+          rightTile = newScene[i];
+        }
+      }
+
+      let tileToPlace = null;
+      const availableTilesToPlace = [];
+
+      const { top, bottom } = this.findVerticalCorners(scene);
+
+      if (tilesAmount == 0) {
+        tiles.forEach((tile) => {
+          if (tile.left == tile.right) {
+            availableTilesToPlace.push(tile);
+          }
+        });
+      } else {
+        tiles.forEach((tile) => {
+          if (tile.left == leftTile.left || tile.right == leftTile.left) {
+            availableTilesToPlace.push(tile);
+          }
+          if (tile.left == rightTile.right || tile.right == rightTile.right) {
+            availableTilesToPlace.push(tile);
+          }
+
+          if (top && (top?.left == tile.left || top?.left == tile.right)) {
+            availableTilesToPlace.push(tile);
+          }
+          if (
+            bottom &&
+            (bottom?.right == tile.left || bottom?.right == tile.right)
+          ) {
+            availableTilesToPlace.push(tile);
+          }
+        });
+      }
+
+      if (availableTilesToPlace.length > 0) {
+        tileToPlace = availableTilesToPlace[0];
+        availableTilesToPlace.forEach((tile) => {
+          if (tile.left + tile.right < tileToPlace.left + tileToPlace.right) {
+            tileToPlace = tile;
+          }
+        });
+      }
+
+      if (tileToPlace) {
+        const msg = {
+          tile: tileToPlace,
+          sisterTile: null,
+          roomId,
+          tableId,
+          playerMode,
+          gameMode,
+          userId: turn,
+        };
+
+        const isPlaced = await this.placeTile(currWs, aWss, msg);
+        if (isPlaced) {
+          await this.sendNewScene(
+            currWs,
+            aWss,
+            roomId,
+            tableId,
+            playerMode,
+            gameMode,
+            turn
+          );
+        }
+      }
+    } else if (!turnAvailable && market.length != 0) {
       // find tile that can be placed on scene in market and give to user
 
       let userTiles = JSON.parse(user.tiles);
 
-      const leftTile = scene[0];
-      const rightTile = scene[scene.length - 1];
+      // const leftTile = scene[0];
+      // const rightTile = scene[scene.length - 1];
+
+      let newScene = scene[Math.floor(scene.length / 2)];
+      let leftTile = null;
+      let rightTile = null;
+
+      let { top, bottom } = this.findVerticalCorners(scene);
+      for (let i = 0; i < newScene.length; i++) {
+        if (newScene[i]?.id >= 0 && !leftTile) {
+          leftTile = newScene[i];
+        }
+      }
+      for (let i = newScene.length - 1; i >= 0; i--) {
+        if (newScene[i]?.id >= 0 && !rightTile) {
+          rightTile = newScene[i];
+        }
+      }
 
       let tileToPlace = null;
 
@@ -510,6 +1560,15 @@ class dominoGameService {
           availableTilesToPlace.push(tile);
         }
         if (tile.left == rightTile.right || tile.right == rightTile.right) {
+          availableTilesToPlace.push(tile);
+        }
+        if (top && (top?.left == tile.left || top?.left == tile.right)) {
+          availableTilesToPlace.push(tile);
+        }
+        if (
+          bottom &&
+          (bottom?.right == tile.left || bottom?.right == tile.right)
+        ) {
           availableTilesToPlace.push(tile);
         }
       });
@@ -819,7 +1878,7 @@ class dominoGameService {
       message
     );
 
-    let turnAvailable = this.isTurnAvailable(userTiles, scene, user);
+    let turnAvailable = this.isTurnAvailable(userTiles, scene, gameMode, user);
     let closeMarket = false;
 
     if (turnAvailable) {
@@ -899,9 +1958,11 @@ class dominoGameService {
     if (!user) {
       return;
     }
-    let availableTurn = this.isTurnAvailable(JSON.parse(user.tiles), scene);
-    // check the market
-    console.log(availableTurn, market.length);
+    let availableTurn = this.isTurnAvailable(
+      JSON.parse(user.tiles),
+      scene,
+      gameMode
+    );
     if (market.length > 0 && !availableTurn) {
       for (const client of aWss.clients) {
         if (
@@ -935,7 +1996,7 @@ class dominoGameService {
     return;
   }
 
-  isTurnAvailable(userTiles, scene, user = null) {
+  isTurnAvailable(userTiles, scene, gameMode = "CLASSIC", user = null) {
     let isTurnAvailable = false;
 
     // get the user tiles
@@ -945,27 +2006,224 @@ class dominoGameService {
       userTiles = JSON.parse(userTiles);
     }
 
-    if (scene.length == 0) {
-      return true;
-    }
+    if (gameMode == "CLASSIC") {
+      let tilesAmount = this.countTiles(scene);
 
-    // check the user tiles
-    if (userTiles.length > 0) {
-      userTiles.forEach((tile) => {
-        // check if the user tiles match the scene
-        if (tile.left == scene[0].left || tile.right == scene[0].left) {
-          isTurnAvailable = true;
-        }
-        if (
-          tile.left == scene[scene.length - 1].right ||
-          tile.right == scene[scene.length - 1].right
-        ) {
-          isTurnAvailable = true;
-        }
-      });
-    }
+      // pick the central row
+      scene = scene[Math.floor(scene.length / 2)];
 
-    return isTurnAvailable;
+      // check the user tiles
+      if (userTiles.length > 0) {
+        if (tilesAmount == 0) {
+          console.log("turn available because of 0 scene");
+          return true;
+        }
+        userTiles.forEach((tile) => {
+          // check if the user tiles match the scene
+          // find left tile on scene
+
+          let leftTile = null;
+          let rightTile = null;
+          for (let i = 0; i < scene.length; i++) {
+            if (scene[i]?.id >= 0 && !leftTile) {
+              leftTile = scene[i];
+            }
+          }
+          for (let i = scene.length - 1; i >= 0; i--) {
+            if (scene[i]?.id >= 0 && !rightTile) {
+              rightTile = scene[i];
+            }
+          }
+
+          // console.log("pastTile", leftTile, rightTile);
+
+          if (tile.left == leftTile?.left || tile.right == leftTile?.left) {
+            // console.log(tile, "^ available");
+            isTurnAvailable = true;
+          }
+          if (tile.left == rightTile?.right || tile.right == rightTile?.right) {
+            // console.log(tile, "^ available");
+
+            isTurnAvailable = true;
+          }
+        });
+      }
+
+      // console.log("isTurnAvailable", isTurnAvailable);
+      return isTurnAvailable;
+    } else {
+      // check for all available tiles
+      const areVerticalsFilled = this.checkIfVerticalsFilled(scene);
+
+      if (!areVerticalsFilled) {
+        // same logic as classic domino but check for available doubles
+        const availableDoubles = [];
+
+        let tilesAmount = this.countTiles(scene);
+
+        scene = scene[Math.floor(scene.length / 2)];
+        const allDoubles = scene.filter((tile) => tile.left == tile.right);
+        allDoubles.forEach((tile) => {
+          // check if on the right and left of double there are tiles
+          const leftTile = scene[scene.indexOf(tile) - 1];
+          const rightTile = scene[scene.indexOf(tile) + 1];
+          if (
+            leftTile &&
+            rightTile &&
+            leftTile?.id >= 0 &&
+            rightTile?.id >= 0
+          ) {
+            availableDoubles.push(tile);
+          }
+        });
+
+        if (userTiles.length > 0) {
+          if (tilesAmount == 0) {
+            // console.log("turn available because of 0 scene");
+            return true;
+          }
+          userTiles.forEach((tile) => {
+            let leftTile = null;
+            let rightTile = null;
+
+            for (let i = 0; i < scene.length; i++) {
+              if (scene[i]?.id >= 0 && !leftTile) {
+                leftTile = scene[i];
+              }
+            }
+
+            for (let i = scene.length - 1; i >= 0; i--) {
+              if (scene[i]?.id >= 0 && !rightTile) {
+                rightTile = scene[i];
+              }
+            }
+
+            availableDoubles.forEach((doubleTile) => {
+              if (
+                tile.left == doubleTile?.left ||
+                tile.right == doubleTile?.left
+              ) {
+                // console.log(tile, "^ available to this", doubleTile);
+
+                isTurnAvailable = true;
+              }
+            });
+
+            if (tile.left == leftTile?.left || tile.right == leftTile?.left) {
+              // console.log(tile, "^ available");
+              isTurnAvailable = true;
+            }
+
+            if (
+              tile.left == rightTile?.right ||
+              tile.right == rightTile?.right
+            ) {
+              // console.log(tile, "^ available");
+
+              isTurnAvailable = true;
+            }
+          });
+        }
+        return isTurnAvailable;
+      } else {
+        // when there are verticals, check all 4 corners
+        const { top, bottom } = this.findVerticalCorners(scene);
+
+        let tilesAmount = this.countTiles(scene);
+
+        let newScene = scene[Math.floor(scene.length / 2)];
+
+        if (userTiles.length > 0) {
+          if (tilesAmount == 0) {
+            console.log("turn available because of 0 scene");
+            return true;
+          }
+          userTiles.forEach((tile) => {
+            let leftTile = null;
+            let rightTile = null;
+
+            for (let i = 0; i < newScene.length; i++) {
+              if (newScene[i]?.id >= 0 && !leftTile) {
+                leftTile = newScene[i];
+              }
+            }
+
+            for (let i = newScene.length - 1; i >= 0; i--) {
+              if (newScene[i]?.id >= 0 && !rightTile) {
+                rightTile = newScene[i];
+              }
+            }
+
+            if (tile.left == leftTile?.left || tile.right == leftTile?.left) {
+              // console.log(tile, "^ available");
+              isTurnAvailable = true;
+            }
+
+            if (
+              tile.left == rightTile?.right ||
+              tile.right == rightTile?.right
+            ) {
+              isTurnAvailable = true;
+            }
+
+            if (tile.left == top?.left || tile.right == top?.left) {
+              isTurnAvailable = true;
+            }
+
+            if (tile.left == bottom?.right || tile.right == bottom?.right) {
+              isTurnAvailable = true;
+            }
+          });
+        }
+        return isTurnAvailable;
+      }
+    }
+  }
+
+  findVerticalCorners(scene) {
+    // take middle row
+    let verticalIndex = null;
+
+    scene.forEach((row, i) => {
+      if (i != Math.floor(scene.length / 2)) {
+        row.forEach((tile, j) => {
+          if (tile?.id >= 0) {
+            verticalIndex = row.indexOf(tile);
+          }
+        });
+      }
+    });
+
+    let top = null;
+    let bottom = null;
+    // find first and last element in rows with index verticalIndex
+    scene.forEach((row) => {
+      if (row[verticalIndex]?.id >= 0) {
+        if (top === null) {
+          top = row[verticalIndex];
+        }
+        bottom = row[verticalIndex];
+      }
+    });
+
+    return { top, bottom };
+  }
+
+  checkIfVerticalsFilled(scene) {
+    // take middle row
+    let middleRow = scene[Math.floor(scene.length / 2)];
+    // check if any other row has tiles
+    let areVerticalsFilled = false;
+    scene.forEach((row) => {
+      if (row != middleRow) {
+        row.forEach((tile) => {
+          if (tile?.id >= 0) {
+            areVerticalsFilled = true;
+          }
+        });
+      }
+    });
+    return areVerticalsFilled;
   }
 
   async checkWin(aWss, roomId, tableId, playerMode, gameMode, startTurn) {
@@ -983,7 +2241,7 @@ class dominoGameService {
     const usersData = await User.findAll();
 
     const playersInRoom = dominoGame.dominoGamePlayers;
-    const scene = JSON.parse(dominoGame.scene);
+    let scene = JSON.parse(dominoGame.scene);
     const market = JSON.parse(dominoGame.market);
     let winners = [];
 
@@ -1006,7 +2264,10 @@ class dominoGameService {
       // check if someone can make a turn
       let isTurnAvailable = false;
       playersInRoom.forEach((player) => {
-        if (this.isTurnAvailable(player.tiles, scene) && !isTurnAvailable) {
+        if (
+          this.isTurnAvailable(player.tiles, scene, gameMode) &&
+          !isTurnAvailable
+        ) {
           isTurnAvailable = true;
         }
       });
@@ -1020,7 +2281,10 @@ class dominoGameService {
           JSON.parse(player.tiles).forEach((tile) => {
             score += tile.left + tile.right;
           });
-          playersScore.push({ userId: player.userId, score: score });
+          playersScore.push({
+            userId: player.userId,
+            score: score,
+          });
         });
 
         // find the winner (player with lowest score)
@@ -1056,9 +2320,38 @@ class dominoGameService {
         playerMode,
         gameMode,
         winners,
-        dominoGame
+        dominoGame,
+        scene,
+        usersData
       );
       return true;
+    }
+
+    if (gameMode == "TELEPHONE" && winners.length < 1) {
+      for (const player of playersInRoom) {
+        if (player.points >= 165) {
+          winners.push({
+            userId: player.userId,
+            username: usersData.find((user) => user.id == player.userId)
+              .username,
+          });
+        }
+
+        if (winners.length > 0) {
+          await this.endClassicDominoGame(
+            aWss,
+            roomId,
+            tableId,
+            playerMode,
+            gameMode,
+            winners,
+            dominoGame,
+            scene,
+            usersData
+          );
+          return true;
+        }
+      }
     }
 
     //  продолжаем или заканчиваем игру если режим телефон
@@ -1082,7 +2375,10 @@ class dominoGameService {
           gameMode,
           continueStatus.lastWinnerId,
           startTurn,
-          continueStatus.lastWinnerScore
+          continueStatus.lastWinnerScore,
+          continueStatus.playerScore,
+          continueStatus.lastWinnerPrevScore,
+          usersData
         );
         return true;
       } else if (continueStatus.isGameEnded) {
@@ -1093,11 +2389,14 @@ class dominoGameService {
           playerMode,
           gameMode,
           winners,
-          dominoGame
+          dominoGame,
+          scene,
+          usersData
         );
         return true;
       }
     }
+    return false;
   }
   async endClassicDominoGame(
     aWss,
@@ -1106,8 +2405,14 @@ class dominoGameService {
     playerMode,
     gameMode,
     winners,
-    dominoGame
+    dominoGame,
+    scene,
+    usersData
   ) {
+    const betInfo = this.getDominoRoomBetInfo(roomId);
+    const prize =
+      ((betInfo.bet - betInfo.commission) * playerMode) / winners.length;
+
     // send message only to winners
     aWss.clients.forEach((client) => {
       if (
@@ -1121,12 +2426,21 @@ class dominoGameService {
           JSON.stringify({
             method: "winDominoGame",
             winners: winners,
+            prize,
+            bet: betInfo.bet,
+            playersTiles: dominoGame.dominoGamePlayers.map((player) => {
+              return {
+                userId: player.userId,
+                username: usersData.find((user) => user.id == player.userId)
+                  .username,
+                tiles: JSON.parse(player.tiles),
+                points: player.points,
+              };
+            }),
           })
         );
       }
     });
-
-    const betInfo = this.getDominoRoomBetInfo(roomId);
 
     // send message to all who lost
     aWss.clients.forEach((client) => {
@@ -1142,16 +2456,31 @@ class dominoGameService {
             method: "endDominoGame",
             winners: winners,
             lostAmount: betInfo.bet,
+            playersTiles: dominoGame.dominoGamePlayers.map((player) => {
+              return {
+                userId: player.userId,
+                username: usersData.find((user) => user.id == player.userId)
+                  .username,
+                tiles: JSON.parse(player.tiles),
+                points: player.points,
+              };
+            }),
           })
         );
       }
     });
 
     // update db records
+    // обновляем что игра завершилась и ожидает сброса
+    await DominoGame.update(
+      {
+        isFinished: true,
+      },
+      { where: { id: dominoGame.id } }
+    );
 
     setTimeout(async () => {
-      const prize =
-        ((betInfo.bet - betInfo.commission) * playerMode) / winners.length;
+      const playersInRoom = dominoGame.dominoGamePlayers;
 
       aWss.clients.forEach((client) => {
         if (
@@ -1176,22 +2505,64 @@ class dominoGameService {
         });
       });
 
+      let emptyScene = createEmptyScene();
       await DominoGame.update(
         {
           startedAt: null,
           isStarted: false,
           turn: null,
           turnQueue: "[]",
-          scene: "[]",
+          scene: JSON.stringify(emptyScene),
           market: "[]",
+          isFinished: false,
+          continued: false,
         },
         { where: { id: dominoGame.id } }
       );
 
+      // update stats for each player
+      playersInRoom.forEach(async (player) => {
+        await Stats.update(
+          {
+            gameDominoPlayed: literal(`gameDominoPlayed + 1`),
+            moneyDominoLost: literal(
+              `moneyDominoLost + ${
+                winners.map((winner) => winner.userId).includes(player.userId)
+                  ? 0
+                  : betInfo.bet
+              }`
+            ),
+            moneyDominoWon: literal(
+              `moneyDominoWon + ${
+                winners.map((winner) => winner.userId).includes(player.userId)
+                  ? prize - betInfo.bet
+                  : 0
+              }`
+            ),
+            dominoTokens: literal(`dominoTokens + ${betInfo.tokens}`),
+          },
+          { where: { userId: player.userId } }
+        );
+        await DominoUserGame.create({
+          userId: player.userId,
+          isWinner: winners
+            .map((winner) => winner.userId)
+            .includes(player.userId),
+          winSum: winners.map((winner) => winner.userId).includes(player.userId)
+            ? prize - betInfo.bet
+            : 0,
+          scene,
+          roomId,
+          tableId,
+          playerMode,
+          gameMode,
+        });
+      });
+
       await DominoGamePlayer.destroy({
         where: { dominoGameId: dominoGame.id },
       });
-    }, 10000);
+    }, 20000);
   }
 
   async checkEndTelephoneDominoGame(
@@ -1202,8 +2573,6 @@ class dominoGameService {
     gameMode,
     winners
   ) {
-    // проверить или можем продолжить игру
-
     let dominoGame = await DominoGame.findOne({
       where: {
         tableId,
@@ -1214,9 +2583,11 @@ class dominoGameService {
       include: DominoGamePlayer,
     });
 
+    const allUsers = await User.findAll();
+
     // посчитать количество очков по доминошкам у людей в конце игры
     let players = dominoGame.dominoGamePlayers;
-    let playerScore = countPlayersPoints(players);
+    let playerScore = countPlayersPoints(players, allUsers);
 
     // найти игрока с меньшим кол-вом из playersScore
 
@@ -1249,7 +2620,7 @@ class dominoGameService {
     players = dominoGame.dominoGamePlayers;
 
     // проверяем есть ли у когото больше 165 очков
-    const winnerCandidates = players.filter((player) => player.points >= 40);
+    const winnerCandidates = players.filter((player) => player.points >= 165);
     // find winner from winnerCandidates with max points
     let winner = null;
     if (winnerCandidates.length > 0) {
@@ -1264,7 +2635,9 @@ class dominoGameService {
       return {
         isGameEnded: false,
         lastWinnerId: minPlayer.userId,
+        lastWinnerPrevScore: minPlayer.score,
         lastWinnerScore: minPlayer.score + allPoints,
+        playerScore: playerScore,
       };
     }
   }
@@ -1277,7 +2650,10 @@ class dominoGameService {
     gameMode,
     turn,
     startTurn,
-    lastWinnerScore
+    lastWinnerScore,
+    playersScore,
+    lastWinnerPrevScore,
+    usersData
   ) {
     let dominoGame = await DominoGame.findOne({
       where: {
@@ -1288,6 +2664,8 @@ class dominoGameService {
       },
       include: DominoGamePlayer,
     });
+
+    let pastRoundDominoGame = dominoGame;
 
     let playersInRoom = dominoGame.dominoGamePlayers;
 
@@ -1303,11 +2681,20 @@ class dominoGameService {
 
     // делаем доминошки и сортируем по пользователям
     const { playersTiles, marketTiles } = generateAndSortTiles(
+      dominoGame.dominoGamePlayers,
       dominoGame.playerMode,
-      turnQueue
+      turnQueue,
+      dominoGame.gameMode
     );
+
+    const emptyScene = createEmptyScene();
     await DominoGame.update(
-      { isStarted: true, turnQueue: JSON.stringify(turnQueue), scene: "[]" },
+      {
+        isStarted: true,
+        turnQueue: JSON.stringify(turnQueue),
+        scene: JSON.stringify(emptyScene),
+        continued: true,
+      },
       { where: { id: dominoGame.id } }
     );
 
@@ -1356,7 +2743,9 @@ class dominoGameService {
     gameMessage.players = usersInThisTable;
     gameMessage.market = marketTiles;
     gameMessage.turn = turn;
+    gameMessage.continued = dominoGame.continued;
     gameMessage.turnTime = 0;
+    gameMessage.scene = emptyScene;
     gameMessage.method = "startDominoGameTable";
 
     const lastWinnerUsername = allUsers.find(
@@ -1387,24 +2776,20 @@ class dominoGameService {
         lastWinnerScore,
         lastWinnerId: turn,
         lastWinnerUsername,
+        lastWinnerPrevScore,
+        playersScore,
+        playersTiles: pastRoundDominoGame.dominoGamePlayers.map((player) => {
+          return {
+            userId: player.userId,
+            username: usersData.find((user) => user.id == player.userId)
+              .username,
+            tiles: JSON.parse(player.tiles),
+          };
+        }),
       }
     );
 
     setTimeout(async () => {
-      // // message to redraw all on client
-      // if (currentRoomClients.length > 0) {
-      //   currentRoomClients.forEach((ws) => {
-      //     this.sendAllTableInfo(
-      //       ws,
-      //       roomId,
-      //       tableId,
-      //       playerMode,
-      //       gameMode,
-      //       true
-      //     );
-      //   });
-      // }
-
       // начало новой очереди игры
       await startTurn(aWss, roomId, tableId, playerMode, gameMode, turn, null);
 
@@ -1417,20 +2802,6 @@ class dominoGameService {
         gameMessage
       );
     }, 5000);
-  }
-
-  async endTelephoneDominoGame(
-    aWss,
-    roomId,
-    tableId,
-    playerMode,
-    gameMode,
-    winners,
-    dominoGame
-  ) {
-    console.log(
-      "sdfsdhfjksadfhkasjdhfklajshfkjlsadhfkjlasdhfjksahjfasdlkjfhasdjkhfksadjlhfkjlsadhjlkfadshfkljasdhfjklsadhfkjsadhklfhadsfhalsdj"
-    );
   }
 
   async sendAllTableInfo(
@@ -1483,11 +2854,46 @@ class dominoGameService {
       tableId,
       playerMode,
       gameMode,
+      continued: dominoGame.continued,
       clearScene,
       user: usersData.find((user) => user.id == ws.userId),
     };
 
     ws.send(JSON.stringify(message));
+  }
+
+  sendEmoji(aWss, roomId, tableId, playerMode, gameMode, emojiId, userId) {
+    const message = {
+      method: "sendEmoji",
+      emojiId,
+      userId,
+    };
+
+    roomsFunctions.sendToClientsInTable(
+      aWss,
+      roomId,
+      tableId,
+      playerMode,
+      gameMode,
+      message
+    );
+  }
+
+  sendPhrase(aWss, roomId, tableId, playerMode, gameMode, phraseId, userId) {
+    const message = {
+      method: "sendPhrase",
+      phraseId,
+      userId,
+    };
+
+    roomsFunctions.sendToClientsInTable(
+      aWss,
+      roomId,
+      tableId,
+      playerMode,
+      gameMode,
+      message
+    );
   }
 
   getDominoRoomBetInfo(roomId) {
@@ -1496,33 +2902,50 @@ class dominoGameService {
         return {
           bet: 0.5,
           commission: 0.075,
+          tokens: 2,
         };
       case 2:
         return {
           bet: 1,
           commission: 0.15,
+          tokens: 5,
         };
       case 3:
         return {
           bet: 3,
           commission: 0.45,
+          tokens: 15,
         };
       case 4:
         return {
           bet: 5,
           commission: 0.75,
+          tokens: 25,
         };
       case 5:
         return {
           bet: 10,
           commission: 1.5,
+          tokens: 50,
         };
     }
   }
 }
 module.exports = new dominoGameService();
 
-function countPlayersPoints(players) {
+function createEmptyScene() {
+  const scene = [];
+  for (let i = 0; i < 57; i++) {
+    const row = [];
+    for (let j = 0; j < 57; j++) {
+      row.push({});
+    }
+    scene.push(row);
+  }
+  return scene;
+}
+
+function countPlayersPoints(players, allUsers = null) {
   const playerScore = [];
   players.forEach((player) => {
     let score = 0;
@@ -1532,6 +2955,9 @@ function countPlayersPoints(players) {
     playerScore.push({
       userId: player.userId,
       score: score,
+      username: allUsers
+        ? allUsers.find((user) => user.id == player.userId).username
+        : null,
     });
   });
 
@@ -1558,12 +2984,12 @@ async function deleteUserInventoryTile(
     },
     include: DominoGamePlayer,
   });
-  console.log(userId);
+  // console.log(userId);
 
   const user = dominoGame.dominoGamePlayers.find(
     (player) => player.userId == +userId
   );
-  console.log(user);
+  // console.log(user);
   const userTiles = JSON.parse(user.tiles);
   const deletedTile = userTiles.find((userTile) => +userTile.id == +tile.id);
 
@@ -1641,114 +3067,276 @@ async function deleteUserInventoryTile(
   );
 }
 
-async function addTileToLeft(tile, leftTile, dominoGame, scene, inversed) {
+async function addTileToTop(tile, bottomTile, dominoGame, scene, inversed) {
+  const topTileCoords = findTileOnScene(scene, bottomTile);
+  // console.log("bottomTile", bottomTile);
+  // console.log("topTileCoords", topTileCoords);
+  // console.log(tile, bottomTile, "top and tile when true");
+
+  // place tile above
+
+  if (bottomTile.rotate) {
+    if (inversed) {
+      scene[topTileCoords.row - 1][topTileCoords.index] = {
+        left: tile.right,
+        right: tile.left,
+        id: tile.id,
+        rotate: false,
+      };
+    } else {
+      scene[topTileCoords.row - 1][topTileCoords.index] = {
+        left: tile.left,
+        right: tile.right,
+        id: tile.id,
+        rotate: false,
+      };
+    }
+  } else {
+    if (tile.left == tile.right) {
+      scene[topTileCoords.row - 1][topTileCoords.index] = {
+        left: tile.left,
+        right: tile.right,
+        id: tile.id,
+        rotate: true,
+      };
+    } else {
+      if (inversed) {
+        scene[topTileCoords.row - 1][topTileCoords.index] = {
+          left: tile.right,
+          right: tile.left,
+          id: tile.id,
+          rotate: false,
+        };
+
+        // console.log("TOP-2", scene[Math.floor(scene.length / 2) - 3]);
+        // console.log("TOP-1", scene[Math.floor(scene.length / 2) - 2]);
+        // console.log("TOP", scene[Math.floor(scene.length / 2) - 1]);
+        // console.log("MIDDLE", scene[Math.floor(scene.length / 2)]);
+        // console.log("BOTTOM", scene[Math.floor(scene.length / 2) + 1]);
+      } else {
+        scene[topTileCoords.row - 1][topTileCoords.index] = {
+          left: tile.left,
+          right: tile.right,
+          id: tile.id,
+          rotate: false,
+        };
+        //   console.log("TOP-2", scene[Math.floor(scene.length / 2) - 3]);
+        //   console.log("TOP-1", scene[Math.floor(scene.length / 2) - 2]);
+        //   console.log("TOP", scene[Math.floor(scene.length / 2) - 1]);
+        //   console.log("MIDDLE", scene[Math.floor(scene.length / 2)]);
+        //   console.log("BOTTOM", scene[Math.floor(scene.length / 2) + 1]);
+      }
+    }
+  }
+
+  await DominoGame.update(
+    { scene: JSON.stringify(scene) },
+    { where: { id: dominoGame.id } }
+  );
+}
+
+async function addTileToBottom(tile, topTile, dominoGame, scene, inversed) {
+  const bottomTileCoords = findTileOnScene(scene, topTile);
+  // console.log(tile, topTile, "bottom and tile when true");
+
+  // place tile below
+
+  if (topTile.rotate) {
+    if (inversed) {
+      scene[bottomTileCoords.row + 1][bottomTileCoords.index] = {
+        left: tile.right,
+        right: tile.left,
+        id: tile.id,
+        rotate: false,
+      };
+    } else {
+      scene[bottomTileCoords.row + 1][bottomTileCoords.index] = {
+        left: tile.left,
+        right: tile.right,
+        id: tile.id,
+        rotate: false,
+      };
+    }
+  } else {
+    if (tile.left == tile.right) {
+      scene[bottomTileCoords.row + 1][bottomTileCoords.index] = {
+        left: tile.left,
+        right: tile.right,
+        id: tile.id,
+        rotate: true,
+      };
+    } else {
+      if (inversed) {
+        scene[bottomTileCoords.row + 1][bottomTileCoords.index] = {
+          left: tile.right,
+          right: tile.left,
+          id: tile.id,
+          rotate: false,
+        };
+      } else {
+        scene[bottomTileCoords.row + 1][bottomTileCoords.index] = {
+          left: tile.left,
+          right: tile.right,
+          id: tile.id,
+          rotate: false,
+        };
+      }
+    }
+  }
+
+  await DominoGame.update(
+    { scene: JSON.stringify(scene) },
+    { where: { id: dominoGame.id } }
+  );
+}
+
+async function addTileToLeft(
+  tile,
+  leftTile,
+  dominoGame,
+  scene,
+  inversed,
+  position = "row"
+) {
+  const leftTileCoords = findTileOnScene(scene, leftTile);
+  // console.log("addTileToLeft", leftTile, leftTileCoords);
+
   if (leftTile.rotate) {
     if (inversed) {
-      scene.unshift({
+      scene[leftTileCoords.row][leftTileCoords.index - 1] = {
         left: tile.right,
         right: tile.left,
         id: tile.id,
         rotate: false,
-      });
+      };
     } else {
-      scene.unshift({
+      scene[leftTileCoords.row][leftTileCoords.index - 1] = {
         left: tile.left,
         right: tile.right,
         id: tile.id,
         rotate: false,
-      });
+      };
     }
   } else {
     if (tile.left == tile.right) {
-      scene.unshift({
+      scene[leftTileCoords.row][leftTileCoords.index - 1] = {
         left: tile.left,
         right: tile.right,
         id: tile.id,
         rotate: true,
-      });
+      };
     } else {
       if (inversed) {
-        scene.unshift({
+        scene[leftTileCoords.row][leftTileCoords.index - 1] = {
           left: tile.right,
           right: tile.left,
           id: tile.id,
           rotate: false,
-        });
+        };
       } else {
-        scene.unshift({
+        scene[leftTileCoords.row][leftTileCoords.index - 1] = {
           left: tile.left,
           right: tile.right,
           id: tile.id,
           rotate: false,
-        });
+        };
       }
     }
   }
-  await dominoGame.update({ scene: JSON.stringify(scene) });
+
+  // console.log("newSceneLEft", scene[14]);
+
+  await DominoGame.update(
+    { scene: JSON.stringify(scene) },
+    { where: { id: dominoGame.id } }
+  );
 }
 
-async function addTileToRight(tile, rightTile, dominoGame, scene, inversed) {
+async function addTileToRight(
+  tile,
+  rightTile,
+  dominoGame,
+  scene,
+  inversed,
+  position = "row"
+) {
+  const rightTileCoords = findTileOnScene(scene, rightTile);
+  // console.log("addTileToRight", rightTile, rightTileCoords);
+
   if (rightTile.rotate) {
     if (inversed) {
-      scene.push({
+      scene[rightTileCoords.row][rightTileCoords.index + 1] = {
         left: tile.right,
         right: tile.left,
         id: tile.id,
         rotate: false,
-      });
+      };
     } else {
-      scene.push({
+      scene[rightTileCoords.row][rightTileCoords.index + 1] = {
         left: tile.left,
         right: tile.right,
         id: tile.id,
         rotate: false,
-      });
+      };
     }
   } else {
     if (tile.left == tile.right) {
-      scene.push({
+      scene[rightTileCoords.row][rightTileCoords.index + 1] = {
         left: tile.left,
         right: tile.right,
         id: tile.id,
         rotate: true,
-      });
+      };
     } else {
       if (inversed) {
-        scene.push({
+        scene[rightTileCoords.row][rightTileCoords.index + 1] = {
           left: tile.right,
           right: tile.left,
           id: tile.id,
           rotate: false,
-        });
+        };
       } else {
-        scene.push({
+        scene[rightTileCoords.row][rightTileCoords.index + 1] = {
           left: tile.left,
           right: tile.right,
           id: tile.id,
           rotate: false,
-        });
+        };
       }
     }
   }
-  await dominoGame.update({ scene: JSON.stringify(scene) });
+
+  // console.log("newScene", scene[14]);
+
+  await DominoGame.update(
+    { scene: JSON.stringify(scene) },
+    { where: { id: dominoGame.id } }
+  );
 }
 
-function sendToUsersInTable(aWss, msg, method) {
-  for (const client of aWss.clients) {
-    if (
-      client.roomId == msg.roomId &&
-      client.tableId == msg.tableId &&
-      client.playerMode == msg.playerMode &&
-      client.gameMode == msg.gameMode
-    ) {
-      msg.method = method;
-      client.send(JSON.stringify(msg));
-    }
-  }
+function findTileOnScene(scene, tile) {
+  let rowNumber = -1;
+  let index = -1;
+
+  scene.forEach((row) => {
+    row.forEach((sceneTile) => {
+      if (sceneTile.id == tile.id) {
+        rowNumber = scene.indexOf(row);
+        index = row.indexOf(sceneTile);
+      }
+    });
+  });
+
+  return { row: rowNumber, index };
 }
 
-function generateAndSortTiles(playerMode, turnQueue) {
-  // console.log(1231231231231231, playerMode, turnQueue);
+function generateAndSortTiles(
+  players,
+  playerMode,
+  turnQueue,
+  gameMode = "CLASSIC"
+) {
+  console.log(players);
   // make 28 domino tiles
   let tiles = [];
   let doubleTiles = [];
@@ -1773,12 +3361,31 @@ function generateAndSortTiles(playerMode, turnQueue) {
     // shuffle 14 tiles between 2 players
     const randomDouble1 =
       doubleTiles[Math.floor(Math.random() * doubleTiles.length)];
-    playersTiles.push({ isFirst: false, tiles: tiles.slice(0, 6) });
+    playersTiles.push({
+      isFirst: false,
+      tiles: tiles.slice(0, 6),
+      userId: players[0].userId,
+    });
     playersTiles[0].tiles.push(randomDouble1);
 
-    const randomDouble2 =
+    let temp = randomDouble1.left;
+    let randomDouble2 =
       doubleTiles[Math.floor(Math.random() * doubleTiles.length)];
-    playersTiles.push({ isFirst: false, tiles: tiles.slice(6, 12) });
+
+    // make sure that second player has different double tile
+    if (temp == randomDouble2.left) {
+      while (temp == randomDouble2.left) {
+        randomDouble2 =
+          doubleTiles[Math.floor(Math.random() * doubleTiles.length)];
+      }
+    }
+
+    playersTiles.push({
+      isFirst: false,
+      tiles: tiles.slice(6, 12),
+      userId: players[1].userId,
+    });
+
     playersTiles[1].tiles.push(randomDouble2);
 
     doubleTiles.splice(doubleTiles.indexOf(randomDouble1), 1);
@@ -1794,7 +3401,26 @@ function generateAndSortTiles(playerMode, turnQueue) {
       // make each player have a double tile and 6 random tiles
       const randomDouble =
         doubleTiles[Math.floor(Math.random() * doubleTiles.length)];
-      playersTiles.push({ isFirst: false, tiles: [randomDouble] });
+      // check if one of the players already has this double tile
+      let isDoubleAlreadyExists = false;
+      playersTiles.forEach((playerTiles) => {
+        playerTiles.tiles.forEach((tile) => {
+          if (
+            tile.left == randomDouble.left &&
+            tile.right == randomDouble.right
+          )
+            isDoubleAlreadyExists = true;
+        });
+      });
+      if (isDoubleAlreadyExists) {
+        i--;
+        continue;
+      }
+      playersTiles.push({
+        isFirst: false,
+        tiles: [randomDouble],
+        userId: players[i].userId,
+      });
       doubleTiles.splice(doubleTiles.indexOf(randomDouble), 1);
     }
 
@@ -1820,23 +3446,50 @@ function generateAndSortTiles(playerMode, turnQueue) {
     });
   });
 
-  if (!isDouble) {
-    return generateAndSortTiles(playerMode);
-  }
+  // if (!isDouble) {
+  //   return generateAndSortTiles(playerMode);
+  // }
 
   // check who has lowest double and make him first
   let lowestDouble = 7;
-  playersTiles.forEach((playerTiles, i) => {
-    playerTiles.userId = turnQueue[i];
+  playersTiles.forEach((playerTiles) => {
+    // playerTiles.userId = turnQueue[i];
     playerTiles.tiles.forEach((tile) => {
-      if (tile.left == tile.right && tile.left < lowestDouble) {
+      if (
+        tile.left == tile.right &&
+        tile.left < lowestDouble &&
+        tile.left != 0
+      ) {
         lowestDouble = tile.left;
         playerTiles.isFirst = true;
       }
     });
   });
 
-  // console.log("output: \n", playersTiles);
+  if (gameMode == "TELEPHONE") {
+    // find player who has tile 2 3 and if there is such player, make him first and all other players not first
+    let playerWith23 = null;
+    playersTiles.forEach((playerTiles) => {
+      playerTiles.tiles.forEach((tile) => {
+        if (
+          (tile.left == 2 && tile.right == 3) ||
+          (tile.left == 3 && tile.right == 2)
+        ) {
+          playerWith23 = playerTiles;
+        }
+      });
+    });
+    console.log(playerWith23, "игроки с 2/3");
+    if (playerWith23 != null) {
+      playersTiles.forEach((playerTiles, i) => {
+        playerTiles.isFirst = false;
+        if (playerTiles.userId == playerWith23.userId) {
+          playerTiles.isFirst = true;
+          console.log(playerTiles.userId, "айдишник");
+        }
+      });
+    }
+  }
 
   return { playersTiles, marketTiles };
 }

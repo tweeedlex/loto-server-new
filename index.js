@@ -80,7 +80,7 @@ const start = async () => {
 
     // await getCurrency();
     // setTimeout(async () => {
-    //   await getCurrency();
+    // await getCurrency();
     // }, 1000 * 60 * 60 * 24);
 
     await LotoGame.update(
@@ -105,12 +105,19 @@ const start = async () => {
     //     console.error('Error deleting table:', err);
     //   });
 
-    // await BotStats.create();
-    // await LotoGame.create({ gameLevel: 1 });
-    // await LotoGame.create({ gameLevel: 2 });
-    // await LotoGame.create({ gameLevel: 3 });
-    // await LotoGame.create({ gameLevel: 4 });
-    // await LotoGame.create({ gameLevel: 5 });
+    const botStats = await BotStats.findAll();
+    if (botStats.length != 1) {
+      await BotStats.destroy({ where: {} });
+      await BotStats.create();
+    }
+
+    const lotoGames = await LotoGame.findAll();
+    if (lotoGames.length != 5) {
+      await LotoGame.destroy({ where: {} });
+      for (let i = 1; i <= 5; i++) {
+        await LotoGame.create({ gameLevel: i });
+      }
+    }
 
     // await DominoGame.destroy({ where: {} });
     await DominoGamePlayer.destroy({ where: {} });
@@ -137,25 +144,32 @@ const start = async () => {
       }
     }
 
-    // for (let i = 1; i <= 5; i++) {
-    //   await LotoSetting.create({
-    //     gameLevel: i,
-    //     allowBots: true,
-    //     maxBots: 4,
-    //     maxTickets: 6,
-    //     winChance: 20,
-    //     jackpotWinChance: 20,
-    //     minJackpotSum: 200,
-    //   });
-    // }
+    const bots = await Bot.findAll();
+    if (bots.length < 30) {
+      for (let i = 0; i < 30; i++) {
+        const randomUserdata = await axios.get(
+          "https://random-data-api.com/api/v2/users"
+        );
+        const username = randomUserdata.data.first_name;
+        await Bot.create({ username, lotoTokens: 10 });
+      }
+    }
 
-    // for (let i = 0; i < 30; i++) {
-    //   const randomUserdata = await axios.get(
-    //     "https://random-data-api.com/api/v2/users"
-    //   );
-    //   const username = randomUserdata.data.first_name;
-    //   await Bot.create({ username, lotoTokens: 1 });
-    // }
+    const lotoSettings = await LotoSetting.findAll();
+    if (lotoSettings.length != 5) {
+      await LotoSetting.destroy({ where: {} });
+      for (let i = 1; i <= 5; i++) {
+        await LotoSetting.create({
+          gameLevel: i,
+          allowBots: true,
+          maxBots: 4,
+          maxTickets: 6,
+          winChance: 20,
+          jackpotWinChance: 20,
+          minJackpotSum: 200,
+        });
+      }
+    }
 
     app.listen(PORT, () => console.log(`Server started on PORT = ${PORT}`));
   } catch (e) {
@@ -227,11 +241,10 @@ app.ws("/game", (ws, req) => {
       case "getAllInfo":
         // отправка всем об онлайне в меню
 
-        let allRoomsOnline = await roomsFunctions.getAllRoomsOnline(aWss);
-        let allRoomsOnlineMsg = { rooms: allRoomsOnline };
-        allRoomsOnlineMsg.method = "allRoomsOnline";
-        ws.send(JSON.stringify(allRoomsOnlineMsg));
-
+        let allrooms = await roomsFunctions.getAllRoomsOnline(aWss);
+        let AllroomsMsg = { rooms: allrooms };
+        AllroomsMsg.method = "allRoomsOnline";
+        ws.send(JSON.stringify(AllroomsMsg));
         // отправка всем о джекпотах в меню
         let allRoomsJackpots = await roomsFunctions.checkAllJackpots();
         let allRoomsJackpotsMsg = { jackpots: allRoomsJackpots };
@@ -241,7 +254,7 @@ app.ws("/game", (ws, req) => {
         // отправка всем о ставке в меню
         let allRoomsBet = await roomsFunctions.checkAllBets();
         let allRoomsBetMsg = { bank: allRoomsBet };
-        allRoomsBetMsg.method = "updateAllRoomsJackpot";
+        allRoomsBetMsg.method = "updateAllRoomsBank";
         ws.send(JSON.stringify(allRoomsBetMsg));
         // roomsFunctions.sendAll(aWss, "updateAllRoomsBank", {
         //   bank: allRoomsBet,
@@ -250,7 +263,7 @@ app.ws("/game", (ws, req) => {
         // отправка всем о начале игры в меню
         let allRoomsStartTimer = await roomsFunctions.getAllRoomsStartTimers();
         let allRoomsStartTimerMsg = { timers: allRoomsStartTimer };
-        allRoomsStartTimerMsg.method = "updateAllRoomsJackpot";
+        allRoomsStartTimerMsg.method = "allRoomsStartTimers";
         ws.send(JSON.stringify(allRoomsStartTimerMsg));
         // roomsFunctions.sendAll(aWss, "allRoomsStartTimers", {
         //   timers: allRoomsStartTimer,
@@ -260,7 +273,7 @@ app.ws("/game", (ws, req) => {
         let allRoomsFinishTimer =
           await roomsFunctions.getAllRoomsFinishTimers();
         let allRoomsFinishTimerMsg = { timers: allRoomsFinishTimer };
-        allRoomsFinishTimerMsg.method = "updateAllRoomsJackpot";
+        allRoomsFinishTimerMsg.method = "allRoomsFinishTimers";
         ws.send(JSON.stringify(allRoomsFinishTimerMsg));
 
         // roomsFunctions.sendAll(aWss, "allRoomsFinishTimers", {

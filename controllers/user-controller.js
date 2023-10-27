@@ -10,6 +10,7 @@ const {
   Payout,
   Deposit,
   PlayedGame,
+  DominoUserGame,
 } = require("../models/db-models");
 const tokenService = require("../service/token-service");
 
@@ -143,8 +144,9 @@ class UserController {
   async getGames(req, res, next) {
     try {
       const userId = req.user.id;
-      const games = await UserGame.findAll({ where: { userId } });
-      return res.json(games);
+      const lotoGames = await UserGame.findAll({ where: { userId } });
+      const dominoGames = await DominoUserGame.findAll({ where: { userId } });
+      return res.json({lotoGames, dominoGames});
     } catch (e) {
       next(e);
     }

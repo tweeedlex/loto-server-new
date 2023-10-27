@@ -62,7 +62,7 @@ class dominoNavService {
       return;
     }
 
-    console.log("msg.dominoRoomId", msg.dominoRoomId);
+    // console.log("msg.dominoRoomId", msg.dominoRoomId);
 
     roomsFunctions.sendAll(aWss, "connectDomino", msg);
 
@@ -136,6 +136,8 @@ class dominoNavService {
       }
     });
 
+    const dominoPlayers = await DominoGamePlayer.findAll();
+
     // form data as in the example
 
     const dominoInfo = [];
@@ -183,10 +185,21 @@ class dominoNavService {
         };
         // record from database
         const tableRecord = dominoGames.find(
-          (game) => game.roomId == dominoRoomId && game.tableId == tableId
+          (game) => game.roomId == dominoRoomId && game.tableId == tableId && game.playerMode == playerMode && game.gameMode == gameMode
         );
         table.startedAt = tableRecord.startedAt;
         table.isStarted = tableRecord.isStarted;
+
+        let tablePoints = dominoPlayers.filter(
+          (player) =>
+            player.dominoGameId == tableRecord.id
+        );
+        tablePoints = tablePoints.map((player) => player.points);
+        table.points = 0;
+        if (tablePoints.length != 0) {
+          table.points = Math.max(...tablePoints);
+        }
+
         dominoRoom.tables.push(table);
       });
       dominoInfo.push(dominoRoom);
@@ -207,18 +220,25 @@ class dominoNavService {
   async removeUserFromTable(aWss, msg) {
     const { dominoRoomId, tableId, playerMode, userId, gameMode } = msg;
 
+    console.log(dominoRoomId, tableId, playerMode, userId, gameMode);
     const dominoGame = await DominoGame.findOne({
       where: { roomId: dominoRoomId, tableId, playerMode, gameMode },
     });
-
-    console.log(msg);
+    console.log(gameMode == "TELEPHONE");
+    console.log(dominoGame);
 
     await DominoGamePlayer.destroy({
       where: { dominoGameId: dominoGame.id, userId },
     });
 
-    const online = this.getTableOnline(aWss, dominoRoomId, tableId, playerMode);
-
+    const online = this.getTableOnline(
+      aWss,
+      msg.dominoRoomId,
+      msg.tableId,
+      msg.playerMode,
+      msg.gameMode
+    );
+    
     roomsFunctions.sendToClientsInTable(
       aWss,
       dominoRoomId,

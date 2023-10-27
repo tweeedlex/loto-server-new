@@ -11,6 +11,7 @@ const {
   BotStats,
   Bot,
   UserGame,
+  DominoUserGame,
 } = require("../models/db-models");
 
 class UserService {
@@ -181,26 +182,18 @@ class UserService {
       });
       return nardsStats;
     } else if (gameType == "domino") {
-      //получаем всех юзеров з лото
       let dominoStats = [];
+      const dominoUserGames = await DominoUserGame.findAll();
       allStats.forEach((user) => {
         if (user.gameDominoPlayed > 0) {
           let userDto = {
             username: user.user.username,
-            moneyWon: user.moneyDominoWon,
+            gamesWon: dominoUserGames.filter(
+              (game) => game.userId == user.userId && game.isWinner == true
+            ).length,
             tokens: user.dominoTokens,
           };
           dominoStats.push(userDto);
-        }
-      });
-      bots.forEach((bot) => {
-        if (bot.gameDominoPlayed > 0) {
-          let botDto = {
-            username: bot.username,
-            moneyWon: bot.moneyDominoWon,
-            tokens: bot.dominoTokens,
-          };
-          dominoStats.push(botDto);
         }
       });
       return dominoStats;

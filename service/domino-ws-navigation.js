@@ -45,6 +45,8 @@ class dominoWsNavService {
   async addDominoWsListeners(ws, aWss) {
     ws.on("message", async (msg) => {
       msg = JSON.parse(msg);
+
+      console.log(msg);
       console.log(msg?.gameMode);
 
       switch (msg.method) {
@@ -60,7 +62,7 @@ class dominoWsNavService {
             include: DominoGamePlayer,
           });
 
-          console.log(dominoGame);
+          // console.log(dominoGame);
 
           const betInfo = dominoGameService.getDominoRoomBetInfo(
             msg.dominoRoomId
@@ -88,6 +90,11 @@ class dominoWsNavService {
               (player) => player.userId === msg.userId
             )
           ) {
+            // ws.send(
+            //   JSON.stringify({
+            //     method: "notEnoughBalance",
+            //   })
+            // );
             return;
           }
 
@@ -104,6 +111,21 @@ class dominoWsNavService {
               (player) => player.userId === msg.userId
             )
           ) {
+            if (dominoGame.isFinished == true) {
+              let message = {
+                method: "reconnectEndedDominoGame",
+              };
+              roomsFunctions.sendToClientsInTable(
+                aWss,
+                msg.dominoRoomId,
+                msg.tableId,
+                msg.playerMode,
+                msg.gameMode,
+                message
+              );
+
+              return;
+            }
             await dominoGameService.sendAllTableInfo(
               ws,
               msg.dominoRoomId,
@@ -176,6 +198,30 @@ class dominoWsNavService {
             msg.gameMode,
             checkDominoGame.turn,
             checkDominoGame
+          );
+          break;
+
+        case "sendEmoji":
+          dominoGameService.sendEmoji(
+            aWss,
+            msg.roomId,
+            msg.tableId,
+            msg.playerMode,
+            msg.gameMode,
+            msg.emojiId,
+            msg.userId
+          );
+          break;
+
+        case "sendPhrase":
+          dominoGameService.sendPhrase(
+            aWss,
+            msg.roomId,
+            msg.tableId,
+            msg.playerMode,
+            msg.gameMode,
+            msg.phraseId,
+            msg.userId
           );
           break;
       }
@@ -306,7 +352,12 @@ class dominoWsNavService {
       const turnQueue = JSON.parse(dominoGame.turnQueue);
       let nexTurn = +turnQueue[(turnQueue.indexOf(turn) + 1) % players];
       // drop lowest tile that can be placed if player didn't place tile in time
-      await dominoGameService.placeTileOnSkippedTurn(aWss, dominoGame, turn);
+      await dominoGameService.placeTileOnSkippedTurn(
+        aWss,
+        dominoGame,
+        turn,
+        gameMode
+      );
 
       await dominoGame.update({
         turn: nexTurn,

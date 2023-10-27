@@ -28,5 +28,10 @@ router.post("/test", gameController.test);
 router.post("/start", authMiddleware, gameController.start);
 
 router.get("/domino-status", authMiddleware, gameController.getDominoStatus);
+router.post(
+  "/domino-isstarted",
+  authMiddleware,
+  gameController.isDominoStarted
+);
 
 module.exports = router;

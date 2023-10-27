@@ -232,10 +232,12 @@ const DominoGame = sequelize.define("dominoGame", {
   },
   startedAt: { type: DataTypes.DATE },
   isStarted: { type: DataTypes.BOOLEAN, defaultValue: false },
+  isFinished: { type: DataTypes.BOOLEAN, defaultValue: false },
   roomId: { type: DataTypes.INTEGER, allowNull: false },
   tableId: { type: DataTypes.INTEGER, allowNull: false },
   playerMode: { type: DataTypes.INTEGER, allowNull: false },
   gameMode: { type: DataTypes.STRING, allowNull: false },
+  continued: { type: DataTypes.BOOLEAN, defaultValue: false },
   turn: { type: DataTypes.STRING, defaultValue: "" },
   turnTime: { type: DataTypes.DATE, defaultValue: null },
   turnQueue: { type: DataTypes.JSON, defaultValue: "[]" },
@@ -255,8 +257,28 @@ const DominoGamePlayer = sequelize.define("dominoGamePlayer", {
   points: { type: DataTypes.INTEGER, defaultValue: 0 },
 });
 
+const DominoUserGame = sequelize.define("dominoUserGame", {
+  id: {
+    type: DataTypes.INTEGER,
+    autoIncrement: true,
+    primaryKey: true,
+    unique: true,
+    allowNull: false,
+  },
+  isWinner: { type: DataTypes.BOOLEAN, defaultValue: false },
+  winSum: { type: DataTypes.FLOAT, defaultValue: 0 },
+  scene: { type: DataTypes.JSON, defaultValue: "[]" },
+  roomId: { type: DataTypes.INTEGER, allowNull: false },
+  tableId: { type: DataTypes.INTEGER, allowNull: false },
+  playerMode: { type: DataTypes.INTEGER, allowNull: false },
+  gameMode: { type: DataTypes.STRING, allowNull: false },
+});
+
 DominoGame.hasMany(DominoGamePlayer);
 DominoGamePlayer.belongsTo(DominoGame);
+
+User.hasMany(DominoUserGame);
+DominoUserGame.belongsTo(User);
 
 User.hasOne(DominoGamePlayer);
 DominoGamePlayer.belongsTo(User);
@@ -298,4 +320,5 @@ module.exports = {
   PlayedGame,
   DominoGame,
   DominoGamePlayer,
+  DominoUserGame,
 };
