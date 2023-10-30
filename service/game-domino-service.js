@@ -93,7 +93,7 @@ class dominoGameService {
 
     // add record to db
     await DominoGame.update(
-      { startedAt: time },
+      { startedAt: time, startedWaitingAt: null },
       {
         where: {
           tableId: msg.tableId,
@@ -1190,7 +1190,7 @@ class dominoGameService {
         roomId: roomId,
         playerMode: playerMode,
         gameMode: gameMode,
-      }
+      },
     });
 
     let newScene = scene[Math.floor(scene.length / 2)];
@@ -1332,7 +1332,7 @@ class dominoGameService {
       const scores = playersInRoom.map((player) => player.points);
       let maxScore = 0;
       maxScore = Math.max(...scores);
-      // send score of table to all users 
+      // send score of table to all users
       aWss.clients.forEach((client) => {
         client.send(
           JSON.stringify({
@@ -1350,7 +1350,6 @@ class dominoGameService {
   }
 
   async placeTileOnSkippedTurn(aWss, dominoGamePast, turn, gameMode) {
-    return;
     let dominoGame = dominoGamePast;
     let roomId = dominoGame.roomId;
     let tableId = dominoGame.tableId;
@@ -2589,8 +2588,31 @@ class dominoGameService {
     let players = dominoGame.dominoGamePlayers;
     let playerScore = countPlayersPoints(players, allUsers);
 
-    // найти игрока с меньшим кол-вом из playersScore
+    // если есть игрок с единственной доминошкой 0/0, начислмть 10 очков
+    // ищем всех с 1 доминошкой
+    const playersWithOneTile = players.filter(
+      (player) => JSON.parse(player.tiles).length == 1
+    );
 
+    // ищем того у кого 0/0
+    const playerWithZeroZero = playersWithOneTile.find(
+      (player) =>
+        JSON.parse(player.tiles)[0].left == 0 &&
+        JSON.parse(player.tiles)[0].right == 0
+    );
+
+    // начисляем ему 10 очков
+    if (playerWithZeroZero) {
+      const newPoints = (players.find(
+        (player) => player.userId == playerWithZeroZero.userId
+      ).points += 10);
+      await DominoGamePlayer.update(
+        { points: newPoints },
+        { where: { userId: playerWithZeroZero.userId } }
+      );
+    }
+
+    // найти игрока с меньшим кол-вом из playersScore
     const minPlayer = playerScore.reduce((prev, curr) =>
       prev.score < curr.score ? prev : curr
     );
@@ -2788,6 +2810,29 @@ class dominoGameService {
         }),
       }
     );
+
+    playersInRoom = await DominoGamePlayer.findAll({
+      where: {
+        dominoGameId: dominoGame.id,
+      },
+    });
+
+    const scores = playersInRoom.map((player) => player.points);
+    let maxScore = 0;
+    maxScore = Math.max(...scores);
+
+    aWss.clients.forEach((client) => {
+      client.send(
+        JSON.stringify({
+          method: "updateTableScore",
+          roomId,
+          tableId,
+          playerMode,
+          gameMode,
+          points: maxScore,
+        })
+      );
+    });
 
     setTimeout(async () => {
       // начало новой очереди игры
@@ -3435,25 +3480,13 @@ function generateAndSortTiles(
     }
   }
 
-  // check if one of the players has double, if not - shuffle again
-  let isDouble = false;
-
-  playersTiles.forEach((playerTiles) => {
-    playerTiles.tiles.forEach((tile) => {
-      if (tile.left == tile.right) {
-        isDouble = true;
-      }
-    });
-  });
-
   // if (!isDouble) {
   //   return generateAndSortTiles(playerMode);
   // }
 
-  // check who has lowest double and make him first
+  // find lowest double
   let lowestDouble = 7;
   playersTiles.forEach((playerTiles) => {
-    // playerTiles.userId = turnQueue[i];
     playerTiles.tiles.forEach((tile) => {
       if (
         tile.left == tile.right &&
@@ -3461,10 +3494,48 @@ function generateAndSortTiles(
         tile.left != 0
       ) {
         lowestDouble = tile.left;
+      }
+    });
+  });
+
+  // find player with lowest double and make him first
+  playersTiles.forEach((playerTiles) => {
+    playerTiles.tiles.forEach((tile) => {
+      if (tile.left == tile.right && tile.left == lowestDouble) {
         playerTiles.isFirst = true;
       }
     });
   });
+
+  // check if player has double 0 and no other doubles, make this player not first and random player first
+  let playerWithZero = null;
+  playersTiles.forEach((playerTiles) => {
+    playerTiles.tiles.forEach((tile) => {
+      if (tile.left == 0 && tile.right == 0) {
+        playerWithZero = playerTiles;
+      }
+    });
+  });
+
+  if (playerWithZero != null) {
+    let isDouble = false;
+    playerWithZero.tiles.forEach((tile) => {
+      if (tile.left == tile.right) {
+        isDouble = true;
+      }
+    });
+    if (!isDouble) {
+      playerWithZero.isFirst = false;
+      // pick random player that is not playerWithZero and make him first
+      let randomPlayer = null;
+      playersTiles.forEach((playerTiles) => {
+        if (playerTiles.userId != playerWithZero.userId) {
+          randomPlayer = playerTiles;
+        }
+      });
+      randomPlayer.isFirst = true;
+    }
+  }
 
   if (gameMode == "TELEPHONE") {
     // find player who has tile 2 3 and if there is such player, make him first and all other players not first
@@ -3490,6 +3561,8 @@ function generateAndSortTiles(
       });
     }
   }
+
+  marketTiles = shuffle(marketTiles);
 
   return { playersTiles, marketTiles };
 }
@@ -3534,19 +3607,23 @@ async function createMarketInRoom(
     }
   );
 }
-
+// playersTiles приходят с правильным порядком игроков, но функция запихивает их в базу в неправильном порядке
 async function createPlayersTiles(aWss, msg, playersTiles, dominoGame) {
-  // console.log(playersTiles, dominoGame);
-  let i = 0;
   const playersInRoom = await DominoGamePlayer.findAll({
     where: {
       dominoGameId: dominoGame.id,
     },
   });
+  console.log(playersTiles);
   for (const player of playersInRoom) {
-    // console.log(`playersTiles[${i}]`, playersTiles[i]);
     await DominoGamePlayer.update(
-      { tiles: JSON.stringify(playersTiles[i].tiles) },
+      {
+        tiles: JSON.stringify(
+          playersTiles.find(
+            (playerTiles) => playerTiles.userId == player.userId
+          ).tiles
+        ),
+      },
       {
         where: {
           dominoGameId: dominoGame.id,
@@ -3554,16 +3631,16 @@ async function createPlayersTiles(aWss, msg, playersTiles, dominoGame) {
         },
       }
     );
-    if (playersTiles[i].isFirst) {
-      await DominoGame.update(
-        { turn: playersTiles[i].userId },
-        {
-          where: {
-            id: dominoGame.id,
-          },
-        }
-      );
-    }
-    i++;
   }
+  await DominoGame.update(
+    {
+      turn: playersTiles.find((playerTiles) => playerTiles.isFirst == true)
+        .userId,
+    },
+    {
+      where: {
+        id: dominoGame.id,
+      },
+    }
+  );
 }

@@ -231,6 +231,7 @@ const DominoGame = sequelize.define("dominoGame", {
     allowNull: false,
   },
   startedAt: { type: DataTypes.DATE },
+  startedWaitingAt: { type: DataTypes.DATE },
   isStarted: { type: DataTypes.BOOLEAN, defaultValue: false },
   isFinished: { type: DataTypes.BOOLEAN, defaultValue: false },
   roomId: { type: DataTypes.INTEGER, allowNull: false },

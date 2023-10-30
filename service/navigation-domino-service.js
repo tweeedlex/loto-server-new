@@ -64,6 +64,44 @@ class dominoNavService {
 
     // console.log("msg.dominoRoomId", msg.dominoRoomId);
 
+    // получаем время начала ожидания комнаты
+    let time = null;
+    if (online == 1 && !tableData.isStarted) {
+      let date = await axios.get(
+        "https://timeapi.io/api/Time/current/zone?timeZone=Europe/London",
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      time = new Date(date.data.dateTime).getTime();
+
+      await DominoGame.update(
+        {
+          startedWaitingAt: time,
+        },
+        {
+          where: {
+            roomId: msg.dominoRoomId,
+            tableId: msg.tableId,
+            playerMode: msg.playerMode,
+            gameMode: msg.gameMode,
+          },
+        }
+      );
+    }
+
+    tableData = await DominoGame.findOne({
+      where: {
+        roomId: msg.dominoRoomId,
+        tableId: msg.tableId,
+        playerMode: msg.playerMode,
+        gameMode: msg.gameMode,
+      },
+    });
+
     roomsFunctions.sendAll(aWss, "connectDomino", msg);
 
     roomsFunctions.sendToClientsInTable(
@@ -82,6 +120,7 @@ class dominoNavService {
         tableId: msg.tableId,
         playerMode: msg.playerMode,
         gameMode: msg.gameMode,
+        startedWaitingAt: tableData.startedWaitingAt,
       }
     );
 
@@ -185,14 +224,18 @@ class dominoNavService {
         };
         // record from database
         const tableRecord = dominoGames.find(
-          (game) => game.roomId == dominoRoomId && game.tableId == tableId && game.playerMode == playerMode && game.gameMode == gameMode
+          (game) =>
+            game.roomId == dominoRoomId &&
+            game.tableId == tableId &&
+            game.playerMode == playerMode &&
+            game.gameMode == gameMode
         );
         table.startedAt = tableRecord.startedAt;
         table.isStarted = tableRecord.isStarted;
+        table.startedWaitingAt = tableRecord.startedWaitingAt;
 
         let tablePoints = dominoPlayers.filter(
-          (player) =>
-            player.dominoGameId == tableRecord.id
+          (player) => player.dominoGameId == tableRecord.id
         );
         tablePoints = tablePoints.map((player) => player.points);
         table.points = 0;
@@ -238,7 +281,7 @@ class dominoNavService {
       msg.playerMode,
       msg.gameMode
     );
-    
+
     roomsFunctions.sendToClientsInTable(
       aWss,
       dominoRoomId,
