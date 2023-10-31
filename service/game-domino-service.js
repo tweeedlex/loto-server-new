@@ -220,12 +220,15 @@ class dominoGameService {
     // запускаем ожидание до старта игры
 
     setTimeout(async () => {
+      let roombet = this.getDominoRoomBetInfo(msg.dominoRoomId).bet;
+
       gameMessage.players = usersInThisTable;
       gameMessage.market = marketTiles;
       gameMessage.turn = firstPlayerId;
       gameMessage.turnTime = turnTime + 10000;
       gameMessage.continued = false;
       gameMessage.scene = scene;
+      gameMessage.bet = roombet;
       gameMessage.method = "startDominoGameTable";
 
       // запускаем отчет следующего хода
@@ -317,6 +320,8 @@ class dominoGameService {
     // console.log("BEBRA", scene[Math.floor(scene.length / 2)]);
 
     if (tilesAmount == 0) {
+      console.log("tile = 0");
+
       if (tile.left == tile.right) {
         // find central element in 2d scene
         scene[Math.floor(scene.length / 2)][
@@ -347,6 +352,8 @@ class dominoGameService {
     }
 
     if (tilesAmount == 1) {
+      console.log("tile = 1");
+
       let centralTile =
         scene[Math.floor(scene.length / 2)][
           Math.floor(scene[Math.floor(scene.length / 2)].length / 2)
@@ -377,11 +384,13 @@ class dominoGameService {
     }
 
     if (tilesAmount > 1) {
+      console.log("tile > 1");
+
       let newScene = scene[Math.floor(scene.length / 2)];
 
       let leftTile = null;
       let rightTile = null;
-      for (let i = 0; i < scene.length; i++) {
+      for (let i = 0; i < newScene.length; i++) {
         if (newScene[i]?.id >= 0 && !leftTile) {
           leftTile = newScene[i];
         }
@@ -3244,7 +3253,9 @@ async function addTileToLeft(
   position = "row"
 ) {
   const leftTileCoords = findTileOnScene(scene, leftTile);
-  // console.log("addTileToLeft", leftTile, leftTileCoords);
+  console.log(tile);
+
+  console.log("addTileToLeft", leftTile, leftTileCoords);
 
   if (leftTile.rotate) {
     if (inversed) {
@@ -3306,7 +3317,8 @@ async function addTileToRight(
   position = "row"
 ) {
   const rightTileCoords = findTileOnScene(scene, rightTile);
-  // console.log("addTileToRight", rightTile, rightTileCoords);
+  console.log(tile);
+  console.log("addTileToRight", rightTile, rightTileCoords);
 
   if (rightTile.rotate) {
     if (inversed) {

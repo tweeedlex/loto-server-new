@@ -16,7 +16,7 @@ const lotoAdminService = require("./loto-admin-service");
 const roomsFunctions = require("./loto-rooms-functions");
 const dominoGameService = require("./game-domino-service");
 const axios = require("axios");
-const { literal } = require("sequelize");
+const { literal, Op } = require("sequelize");
 
 class dominoNavService {
   sendToClientsInTable(aWss, dominoRoomId, tableId, playerMode, gameMode, msg) {
@@ -130,36 +130,6 @@ class dominoNavService {
   }
 
   async getAllDominoInfo(ws = null, aWss) {
-    // example of info array
-    // const dominoInfo = [
-    //   // empty rooms and tables are not included
-    //   {
-    //     dominoRoomId: 2,
-    //     // max amount of players in room (2 or 4)
-    //     playerMode: 4,
-    //     gameMode: "CLASSIC",
-    //     tables: [
-    //       {
-    //         tableId: 1,
-    //         online: 4,
-    //         // user ids and usernames
-    //         players: [{ userId: 14, username: "bebra" }, {}, {}, {}],
-    //         // date when count down starts
-    //         startedAt: "2023-09-19 19:25:52",
-    //         isStarted: false,
-    //       },
-    //       {
-    //         tableId: 3,
-    //         online: 3,
-    //         players: [{}, {}, {}],
-    //         // when started, no date, and show game started label
-    //         startedAt: null,
-    //         isStarted: true,
-    //       },
-    //     ],
-    //   },
-    // ];
-
     const clientsData = [];
 
     aWss.clients.forEach((client) => {
@@ -179,17 +149,21 @@ class dominoNavService {
 
     // form data as in the example
 
-    const dominoInfo = [];
+    let dominoInfo = [];
 
     // extracting unique domino room ids
     const dominoRooms = [
       ...new Set(clientsData.map((client) => client.dominoRoomId)),
     ];
-    const dominoGames = await DominoGame.findAll({
-      where: { roomId: dominoRooms },
+    let dominoGames = await DominoGame.findAll({
+      where: {
+        roomId: dominoRooms,
+      },
     });
 
-    // forming data for each domino room
+    console.log(dominoGames.map((game) => game.roomId));
+
+    // forming data for each domino room // тут получаем инфу только с вебсокетов (в которых есть люди)
     dominoRooms.forEach((dominoRoomId) => {
       const dominoRoomData = clientsData.filter(
         (client) => client.dominoRoomId == dominoRoomId
@@ -245,6 +219,39 @@ class dominoNavService {
 
         dominoRoom.tables.push(table);
       });
+      dominoInfo.push(dominoRoom);
+    });
+
+    dominoGames = await DominoGame.findAll({
+      where: {
+        isStarted: true,
+      },
+    });
+    // forming data for each domino room // тут получаем инфу только с базы (в которых нет людей)
+    dominoGames.forEach((game) => {
+      const dominoRoom = {
+        dominoRoomId: game.roomId,
+        playerMode: game.playerMode,
+        gameMode: game.gameMode,
+        tables: [
+          {
+            tableId: game.tableId,
+            online: game.playerMode,
+            players: [],
+            startedAt: game.startedAt,
+            isStarted: game.isStarted,
+            startedWaitingAt: game.startedWaitingAt,
+            points: 0,
+          },
+        ],
+      };
+      let tablePoints = dominoPlayers.filter(
+        (player) => player.dominoGameId == game.id
+      );
+      tablePoints = tablePoints.map((player) => player.points);
+      if (tablePoints.length != 0) {
+        dominoRoom.tables[0].points = Math.max(...tablePoints);
+      }
       dominoInfo.push(dominoRoom);
     });
 

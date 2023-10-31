@@ -258,6 +258,7 @@ class dominoWsNavService {
       await DominoGame.update(
         {
           turn: currentTurn,
+          turnTime: turnTime,
         },
         {
           where: {
