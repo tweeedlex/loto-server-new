@@ -694,6 +694,8 @@ class dominoGameService {
           }
         });
 
+        console.log("SISTER TILE", sisterTile);
+
         if (sisterTile && sisterTile == "right") {
           if (rightTile.right == tile.left || rightTile.right == tile.right) {
             await addTileToRight(
@@ -2419,7 +2421,7 @@ class dominoGameService {
                 username: usersData.find((user) => user.id == player.userId)
                   .username,
                 tiles: JSON.parse(player.tiles),
-                points: player.points,
+                score: player.points,
               };
             }),
           })
@@ -2792,6 +2794,7 @@ class dominoGameService {
             username: usersData.find((user) => user.id == player.userId)
               .username,
             tiles: JSON.parse(player.tiles),
+            score: player.points,
           };
         }),
       }
