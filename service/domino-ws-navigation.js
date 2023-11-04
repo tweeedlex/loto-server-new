@@ -137,6 +137,10 @@ class dominoWsNavService {
 
           break;
 
+        case "isDominoStarted":
+          await dominoNavService.isDominoStarted(ws, msg);
+          break;
+
         case "getAllDominoInfo":
           await dominoNavService.getAllDominoInfo(ws, aWss);
           break;

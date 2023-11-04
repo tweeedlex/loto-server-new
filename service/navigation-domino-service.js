@@ -255,6 +255,22 @@ class dominoNavService {
       dominoInfo.push(dominoRoom);
     });
 
+    // if 2 objects in dominoInfo array have the same dominoRoomId, gameMode and playerMode then we need to merge them
+    dominoInfo = dominoInfo.reduce((acc, cur) => {
+      const index = acc.findIndex(
+        (item) =>
+          item.dominoRoomId == cur.dominoRoomId &&
+          item.gameMode == cur.gameMode &&
+          item.playerMode == cur.playerMode
+      );
+      if (index == -1) {
+        acc.push(cur);
+      } else {
+        acc[index].tables = [...acc[index].tables, ...cur.tables];
+      }
+      return acc;
+    }, []);
+
     // sending data to the client
     const response = {
       method: "getAllDominoInfo",
@@ -264,6 +280,35 @@ class dominoNavService {
       ws.send(JSON.stringify(response));
     } else {
       roomsFunctions.sendAll(aWss, "getAllDominoInfo", response);
+    }
+  }
+
+  async isDominoStarted(ws, msg) {
+    try {
+      let { dominoRoomId, tableId, playerMode, gameMode, userId } = msg;
+
+      const dominoGame = await DominoGame.findOne({
+        where: {
+          roomId: dominoRoomId,
+          tableId: tableId,
+          playerMode: playerMode,
+          gameMode: gameMode,
+        },
+        include: DominoGamePlayer,
+      });
+
+      if (
+        dominoGame.startedAt != null &&
+        !dominoGame.dominoGamePlayers.find((player) => player.userId === userId)
+      ) {
+        msg.allow = false;
+        return ws.send(JSON.stringify(msg));
+      }
+
+      msg.allow = true;
+      return ws.send(JSON.stringify(msg));
+    } catch (e) {
+      console.log(e);
     }
   }
 
