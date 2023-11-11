@@ -2400,6 +2400,17 @@ class dominoGameService {
     const prize =
       ((betInfo.bet - betInfo.commission) * playerMode) / winners.length;
 
+    // refresh database record
+    dominoGame = await DominoGame.findOne({
+      where: {
+        tableId: tableId,
+        roomId: roomId,
+        playerMode: playerMode,
+        gameMode,
+      },
+      include: DominoGamePlayer,
+    });
+
     // send message only to winners
     aWss.clients.forEach((client) => {
       if (
@@ -2449,7 +2460,7 @@ class dominoGameService {
                 username: usersData.find((user) => user.id == player.userId)
                   .username,
                 tiles: JSON.parse(player.tiles),
-                points: player.points,
+                score: player.points,
               };
             }),
           })

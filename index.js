@@ -119,7 +119,7 @@ const start = async () => {
       }
     }
 
-    await DominoGame.destroy({ where: {} });
+    // await DominoGame.destroy({ where: {} });
     await DominoGamePlayer.destroy({ where: {} });
 
     const dominoGames = await DominoGame.findAll();

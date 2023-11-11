@@ -297,6 +297,8 @@ class dominoNavService {
         include: DominoGamePlayer,
       });
 
+      console.log(msg);
+
       if (
         dominoGame.startedAt != null &&
         !dominoGame.dominoGamePlayers.find((player) => player.userId === userId)

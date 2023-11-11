@@ -107,7 +107,17 @@ class GameService {
       }
 
       // записываем игру в историю игр
-      const { id: playedgameId } = await PlayedGame.create({});
+      let botsTicketsNum = 0;
+      let botsTicketsArr = JSON.parse(game.botsTickets);
+
+      botsTicketsArr.forEach((ticket) => {
+        botsTicketsNum += Number(ticket);
+      });
+
+      const { id: playedgameId } = await PlayedGame.create({
+        roomId: msg.roomId,
+        lotoBotTickets: botsTicketsNum,
+      });
 
       // получаем настройки комнаты и шансы бота на выиграш
       const settings = await LotoSetting.findOne({
@@ -303,13 +313,6 @@ class GameService {
       // отправляем сообщение о начале игры на сервер
       await getAllRoomsFinishTimers(aWss);
 
-      let botsTicketsNum = 0;
-      let botsTicketsArr = JSON.parse(game.botsTickets);
-
-      botsTicketsArr.forEach((ticket) => {
-        botsTicketsNum += Number(ticket);
-      });
-
       for (const client of aWss.clients) {
         if (client.roomId == msg.roomId) {
           let openGameMsg = {
@@ -492,7 +495,7 @@ class GameService {
 
       setTimeout(async () => {
         await this.startLotoGame(ws, aWss, msg);
-      }, 20000);
+      }, 60000);
 
       const date = await axios.get(
         "https://timeapi.io/api/Time/current/zone?timeZone=Europe/London",

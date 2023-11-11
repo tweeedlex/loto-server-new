@@ -146,7 +146,7 @@ class UserController {
       const userId = req.user.id;
       const lotoGames = await UserGame.findAll({ where: { userId } });
       const dominoGames = await DominoUserGame.findAll({ where: { userId } });
-      return res.json({lotoGames, dominoGames});
+      return res.json({ lotoGames, dominoGames });
     } catch (e) {
       next(e);
     }
@@ -307,6 +307,16 @@ class UserController {
         include: UserGame,
       });
 
+      return res.status(200).json(playedGames);
+    } catch (e) {
+      console.log(e);
+      next(e);
+    }
+  }
+
+  async getPlayedDominoGames(req, res, next) {
+    try {
+      const playedGames = await DominoUserGame.findAll();
       return res.status(200).json(playedGames);
     } catch (e) {
       console.log(e);

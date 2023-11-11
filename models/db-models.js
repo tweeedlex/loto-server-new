@@ -220,6 +220,10 @@ const PlayedGame = sequelize.define("playedgame", {
     unique: true,
     allowNull: false,
   },
+  roomId: { type: DataTypes.INTEGER, allowNull: false },
+  lotoBotTickets: {
+    type: DataTypes.INTEGER,
+  },
 });
 
 const DominoGame = sequelize.define("dominoGame", {
