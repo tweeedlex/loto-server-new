@@ -2488,7 +2488,7 @@ class dominoGameService {
           client.gameMode == gameMode
         ) {
           client.send(
-            JSON.stringify({ method: "endAndCloseDominoGame", prize })
+            JSON.stringify({ method: "endAndCloseDominoGame", prize, gameMode })
           );
         }
       });
