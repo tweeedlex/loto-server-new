@@ -2560,6 +2560,8 @@ class dominoGameService {
       await DominoGamePlayer.destroy({
         where: { dominoGameId: dominoGame.id },
       });
+
+      await this.getAllDominoInfo(null, aWss);
     }, 20000);
   }
 
@@ -2993,6 +2995,160 @@ class dominoGameService {
           commission: 1.5,
           tokens: 50,
         };
+    }
+  }
+
+  async getAllDominoInfo(ws = null, aWss) {
+    const clientsData = [];
+
+    aWss.clients.forEach((client) => {
+      if (client.dominoRoomId && client.tableId) {
+        clientsData.push({
+          dominoRoomId: client.dominoRoomId,
+          tableId: client.tableId,
+          userId: client.userId,
+          username: client.username,
+          playerMode: client.playerMode,
+          gameMode: client.gameMode,
+        });
+      }
+    });
+
+    const dominoPlayers = await DominoGamePlayer.findAll();
+
+    // form data as in the example
+
+    let dominoInfo = [];
+
+    // extracting unique domino room ids
+    const dominoRooms = [
+      ...new Set(clientsData.map((client) => client.dominoRoomId)),
+    ];
+    let dominoGames = await DominoGame.findAll({
+      where: {
+        roomId: dominoRooms,
+      },
+    });
+
+    console.log(dominoGames.map((game) => game.roomId));
+
+    // forming data for each domino room // тут получаем инфу только с вебсокетов (в которых есть люди)
+    dominoRooms.forEach((dominoRoomId) => {
+      const dominoRoomData = clientsData.filter(
+        (client) => client.dominoRoomId == dominoRoomId
+      );
+      const playerMode = dominoRoomData[0].playerMode;
+      const gameMode = dominoRoomData[0].gameMode;
+
+      // extracting unique table ids
+      const tables = [
+        ...new Set(dominoRoomData.map((client) => client.tableId)),
+      ];
+      const dominoRoom = {
+        dominoRoomId,
+        playerMode,
+        gameMode,
+        tables: [],
+      };
+      tables.forEach((tableId) => {
+        // getting data for each table in the room
+        const tableData = dominoRoomData.filter(
+          (client) => client.tableId == tableId
+        );
+        const table = {
+          tableId,
+          online: tableData.length,
+          players: tableData.map((client) => ({
+            userId: client.userId,
+            username: client.username,
+          })),
+          startedAt: null,
+          isStarted: false,
+        };
+        // record from database
+        const tableRecord = dominoGames.find(
+          (game) =>
+            game.roomId == dominoRoomId &&
+            game.tableId == tableId &&
+            game.playerMode == playerMode &&
+            game.gameMode == gameMode
+        );
+        table.startedAt = tableRecord.startedAt;
+        table.isStarted = tableRecord.isStarted;
+        table.startedWaitingAt = tableRecord.startedWaitingAt;
+
+        let tablePoints = dominoPlayers.filter(
+          (player) => player.dominoGameId == tableRecord.id
+        );
+        tablePoints = tablePoints.map((player) => player.points);
+        table.points = 0;
+        if (tablePoints.length != 0) {
+          table.points = Math.max(...tablePoints);
+        }
+
+        dominoRoom.tables.push(table);
+      });
+      dominoInfo.push(dominoRoom);
+    });
+
+    dominoGames = await DominoGame.findAll({
+      where: {
+        isStarted: true,
+      },
+    });
+    // forming data for each domino room // тут получаем инфу только с базы (в которых нет людей)
+    dominoGames.forEach((game) => {
+      const dominoRoom = {
+        dominoRoomId: game.roomId,
+        playerMode: game.playerMode,
+        gameMode: game.gameMode,
+        tables: [
+          {
+            tableId: game.tableId,
+            online: game.playerMode,
+            players: [],
+            startedAt: game.startedAt,
+            isStarted: game.isStarted,
+            startedWaitingAt: game.startedWaitingAt,
+            points: 0,
+          },
+        ],
+      };
+      let tablePoints = dominoPlayers.filter(
+        (player) => player.dominoGameId == game.id
+      );
+      tablePoints = tablePoints.map((player) => player.points);
+      if (tablePoints.length != 0) {
+        dominoRoom.tables[0].points = Math.max(...tablePoints);
+      }
+      dominoInfo.push(dominoRoom);
+    });
+
+    // if 2 objects in dominoInfo array have the same dominoRoomId, gameMode and playerMode then we need to merge them
+    dominoInfo = dominoInfo.reduce((acc, cur) => {
+      const index = acc.findIndex(
+        (item) =>
+          item.dominoRoomId == cur.dominoRoomId &&
+          item.gameMode == cur.gameMode &&
+          item.playerMode == cur.playerMode
+      );
+      if (index == -1) {
+        acc.push(cur);
+      } else {
+        acc[index].tables = [...acc[index].tables, ...cur.tables];
+      }
+      return acc;
+    }, []);
+
+    // sending data to the client
+    const response = {
+      method: "getAllDominoInfo",
+      dominoInfo,
+    };
+    if (ws) {
+      ws.send(JSON.stringify(response));
+    } else {
+      roomsFunctions.sendAll(aWss, "getAllDominoInfo", response);
     }
   }
 }
